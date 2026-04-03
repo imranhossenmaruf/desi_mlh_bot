@@ -181,15 +181,30 @@ async def start_handler(client: Client, message: Message):
             "━━━━━━━━━━━━━━━━━━━"
         )
 
+    _premium_text = (
+        "Hello Admin 👋\n"
+        "I would like to upgrade to Premium Membership in this community.\n"
+        "🚀 I'm interested in accessing exclusive features and premium content.\n"
+        "Please let me know the process, requirements, and payment details.\n"
+        "Looking forward to your response.\n"
+        "Thank you 💖"
+    )
+    _premium_url = (
+        "https://t.me/IH_Maruf?text="
+        + urllib.parse.quote(_premium_text, safe="")
+    )
+
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Add Me To Group",
                               url=f"https://t.me/{bot_username}?startgroup=true")],
         [
-            InlineKeyboardButton("💎 VIP",       url="https://t.me/+qFuMDi1eB7AxZGU1"),
-            InlineKeyboardButton("📊 My Status", callback_data="status"),
+            InlineKeyboardButton("👑 VIP Channel",  url="https://t.me/+qFuMDi1eB7AxZGU1"),
+            InlineKeyboardButton("📊 My Status",    callback_data="status"),
         ],
         [
-            InlineKeyboardButton("💰 Buy Premium", url="https://t.me/IH_Maruf"),
+            InlineKeyboardButton("💎 Buy Premium ✨", url=_premium_url),
+        ],
+        [
             InlineKeyboardButton("📤 Share Bot",
                                  url=f"https://t.me/share/url?url=https://t.me/{bot_username}"
                                      f"&text=Join%20this%20awesome%20bot%20%F0%9F%8E%AC"),
