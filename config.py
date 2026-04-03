@@ -23,6 +23,7 @@ filters_col    = db["group_filters"]
 antiflood_col  = db["antiflood_settings"]
 welcome_col    = db["welcome_messages"]
 rules_col      = db["group_rules"]
+premium_col    = db["premium_users"]
 
 API_ID    = int(os.environ["TELEGRAM_API_ID"])
 API_HASH  = os.environ["TELEGRAM_API_HASH"]
@@ -46,10 +47,40 @@ REPLIES = {
     "thank you": "You're welcome! 😊",
 }
 
-broadcast_sessions: dict[int, dict] = {}
-fj_sessions:        dict[int, dict] = {}
-flood_tracker:      dict[tuple, list] = {}
+PACKAGES = {
+    "bronze": {
+        "label":      "🥉 Bronze",
+        "price":      "$3 USDT",
+        "days":       7,
+        "video_limit": 25,
+        "desc":       "৭ দিন • প্রতিদিন ২৫টি ভিডিও",
+    },
+    "silver": {
+        "label":      "🥈 Silver",
+        "price":      "$8 USDT",
+        "days":       30,
+        "video_limit": 50,
+        "desc":       "৩০ দিন • প্রতিদিন ৫০টি ভিডিও",
+    },
+    "gold": {
+        "label":      "🥇 Gold",
+        "price":      "$20 USDT",
+        "days":       90,
+        "video_limit": 999,
+        "desc":       "৯০ দিন • Unlimited ভিডিও",
+    },
+}
+
+PAYMENT_METHODS = {
+    "binance":  {"label": "💛 Binance Pay",  "qr": "assets/binance_qr.png",  "name": "Imran_Hossain Maruf"},
+    "redotpay": {"label": "🔴 RedotPay",     "qr": "assets/redotpay_qr.jpg", "id":   "1329722845"},
+}
+
+broadcast_sessions:   dict[int, dict]       = {}
+fj_sessions:          dict[int, dict]       = {}
+flood_tracker:        dict[tuple, list]     = {}
 pending_welcome_msgs: dict[int, tuple[int, int]] = {}
+proof_sessions:       dict[int, dict]       = {}
 
 STATE_AUDIENCE  = "audience"
 STATE_JOIN_DATE = "join_date"

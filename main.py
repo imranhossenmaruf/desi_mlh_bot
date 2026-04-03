@@ -14,6 +14,7 @@ import handlers.nightmode
 import handlers.antiflood
 import handlers.welcome
 import handlers.misc
+import handlers.premium
 
 from handlers.nightmode import nightmode_loop
 from handlers.misc import schedule_loop
