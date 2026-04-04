@@ -7,6 +7,7 @@ from helpers import get_log_channel
 import handlers  # noqa: F401 — registers all handlers via @app decorators
 from tasks import schedule_loop
 from handlers.nightmode import nightmode_loop
+from handlers.stars_payment import stars_payment_loop
 
 
 async def main():
@@ -31,7 +32,8 @@ async def main():
     loop = asyncio.get_event_loop()
     loop.create_task(schedule_loop(app))
     loop.create_task(nightmode_loop(app))
-    print("[TASKS] Background loops started (schedule + nightmode).")
+    loop.create_task(stars_payment_loop())
+    print("[TASKS] Background loops started (schedule + nightmode + stars_payment).")
 
     await pyrogram_idle()
     await app.stop()
