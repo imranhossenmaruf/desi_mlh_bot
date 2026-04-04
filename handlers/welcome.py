@@ -81,20 +81,26 @@ async def welcome_new_member(client: Client, message: Message):
         if user.is_bot:
             continue
 
-        name = user.first_name or "User"
+        name    = user.first_name or "User"
+        mention = f"<a href='tg://user?id={user.id}'>{name}</a>"
 
         # ── Build welcome text ─────────────────────────────────────────────────
         if doc and doc.get("enabled") and doc.get("text"):
             # Admin set a custom template → use it
             template = doc["text"]
-            grp_text = template.replace("{name}", name).replace("{group}", group_title)
+            grp_text = (
+                template
+                .replace("{mention}", mention)
+                .replace("{name}", name)
+                .replace("{group}", group_title)
+            )
         else:
-            # Default: same style as /start welcome message
+            # Default welcome card with clickable mention
             grp_text = (
                 "━━━━━━━━━━━━━━━━━━━\n"
                 "✨🎬  𝑾𝑬𝑳𝑪𝑶𝑴𝑬 𝑻𝑶 𝑫𝑬𝑺𝑰 𝑴𝑳𝑯 🎬✨\n"
                 "━━━━━━━━━━━━━━━━━━━\n"
-                f"👑 Welcome <b>{name}</b>! 👑\n"
+                f"👑 Welcome {mention}! 👑\n"
                 f"You are now a member of <b>{group_title}</b> 🎥\n\n"
                 "🔥 To watch videos, use the command:\n"
                 "👉 /video\n"

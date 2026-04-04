@@ -131,8 +131,6 @@ async def group_command_guard(client: Client, message: Message):
                         "🎬 Get Video Now",
                         url=f"https://t.me/{bot_username}?start=video",
                     ),
-                ],
-                [
                     InlineKeyboardButton(
                         "🔵⃝𝐂𝐎𝐔𝐏𝐋𝐄⃝🔵",
                         url="https://t.me/+PnUkO8waIEcyNDY1",
