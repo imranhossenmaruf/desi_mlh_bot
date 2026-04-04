@@ -7,8 +7,9 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import (
-    HTML, ADMIN_ID, DAILY_VIDEO_LIMIT, PACKAGES,
+    HTML, ADMIN_ID, DAILY_VIDEO_LIMIT, PACKAGES, PACKAGE_ORDER,
     users_col, videos_col, vid_hist_col, premium_col,
+    groups_col, conversations_col,
     app,
 )
 from helpers import get_bot_username, get_rank, get_status, log_event, bot_api
@@ -16,42 +17,102 @@ from helpers import get_bot_username, get_rank, get_status, log_event, bot_api
 
 @app.on_message(filters.command("stats") & filters.user(ADMIN_ID) & filters.private)
 async def stats_handler(client: Client, message: Message):
-    now        = datetime.utcnow()
-    t0_today   = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    t0_7d      = t0_today - timedelta(days=7)
-    t0_30d     = t0_today - timedelta(days=30)
-    today_str  = now.strftime("%Y-%m-%d")
+    wait = await message.reply_text("⏳ Gathering stats...")
+    now       = datetime.utcnow()
+    t0_today  = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    t0_7d     = t0_today - timedelta(days=7)
+    t0_30d    = t0_today - timedelta(days=30)
+    today_str = now.strftime("%Y-%m-%d")
 
-    total_users    = await users_col.count_documents({})
-    new_today      = await users_col.count_documents({"joined_at": {"$gte": t0_today}})
-    new_7d         = await users_col.count_documents({"joined_at": {"$gte": t0_7d}})
-    new_30d        = await users_col.count_documents({"joined_at": {"$gte": t0_30d}})
+    # ── Users ──────────────────────────────────────────────────────────
+    total_users = await users_col.count_documents({})
+    new_today   = await users_col.count_documents({"joined_at": {"$gte": t0_today}})
+    new_7d      = await users_col.count_documents({"joined_at": {"$gte": t0_7d}})
+    new_30d     = await users_col.count_documents({"joined_at": {"$gte": t0_30d}})
 
+    # ── Videos ─────────────────────────────────────────────────────────
     total_vids      = await videos_col.count_documents({})
     vids_sent_today = await vid_hist_col.count_documents({"sent_at": {"$gte": t0_today}})
     vids_sent_7d    = await vid_hist_col.count_documents({"sent_at": {"$gte": t0_7d}})
     vid_users_today = await users_col.count_documents({"video_date": today_str})
     daily_today     = await users_col.count_documents({"last_daily": {"$gte": t0_today}})
 
+    # ── Premium ────────────────────────────────────────────────────────
+    active_prem = await premium_col.count_documents({"expires_at": {"$gt": now}})
+    pkg_lines   = []
+    for pk in PACKAGE_ORDER:
+        cnt = await premium_col.count_documents({"package": pk, "expires_at": {"$gt": now}})
+        if cnt:
+            label = PACKAGES[pk]["label"]
+            pkg_lines.append(f"   {label}: {cnt}")
+
+    stars_agg = await premium_col.aggregate([
+        {"$group": {"_id": None,
+                    "active": {"$sum": {"$cond": [{"$gt": ["$expires_at", now]}, "$stars_paid", 0]}},
+                    "alltime": {"$sum": "$stars_paid"}}}
+    ]).to_list(length=1)
+    stars_active  = stars_agg[0]["active"]  if stars_agg else 0
+    stars_alltime = stars_agg[0]["alltime"] if stars_agg else 0
+
+    # Stars revenue today
+    stars_today_agg = await premium_col.aggregate([
+        {"$match": {"started_at": {"$gte": t0_today}}},
+        {"$group": {"_id": None, "total": {"$sum": "$stars_paid"}}},
+    ]).to_list(length=1)
+    stars_today = stars_today_agg[0]["total"] if stars_today_agg else 0
+
+    # ── Points ─────────────────────────────────────────────────────────
+    pts_agg    = await users_col.aggregate([
+        {"$group": {"_id": None, "total": {"$sum": "$points"}}}
+    ]).to_list(length=1)
+    total_pts  = pts_agg[0]["total"] if pts_agg else 0
+
+    top_ref    = await users_col.find_one({}, sort=[("ref_count", -1)])
+    top_ref_name = (top_ref.get("first_name") or str(top_ref.get("user_id", "?"))) if top_ref else "—"
+    top_ref_cnt  = top_ref.get("ref_count", 0) if top_ref else 0
+
+    # ── Inbox ──────────────────────────────────────────────────────────
+    inbox_today = await conversations_col.count_documents({"timestamp": {"$gte": t0_today}})
+    inbox_total = await conversations_col.count_documents({})
+
+    # ── Groups ────────────────────────────────────────────────────────
+    total_groups = await groups_col.count_documents({})
+
+    pkg_block = "\n".join(pkg_lines) if pkg_lines else "   None active"
+
+    await wait.delete()
     await message.reply_text(
         "📊 BOT REPORT — 𝑫𝑬𝑺𝑰 𝑴𝑳𝑯\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "👥 USER REGISTRATIONS:\n"
-        f"📌 Total       : {total_users:,}\n"
-        f"🆕 Today       : {new_today:,}\n"
-        f"📅 Last 7 Days : {new_7d:,}\n"
-        f"📆 Last 30 Days: {new_30d:,}\n"
+        "👥 USERS:\n"
+        f"📌 Total        : {total_users:,}\n"
+        f"🆕 Today        : {new_today:,}\n"
+        f"📅 Last 7 Days  : {new_7d:,}\n"
+        f"📆 Last 30 Days : {new_30d:,}\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📹 VIDEO SYSTEM:\n"
-        f"📦 Library     : {total_vids:,} videos\n"
-        f"▶️  Sent Today  : {vids_sent_today:,} requests\n"
-        f"▶️  Sent 7 Days : {vids_sent_7d:,} requests\n"
-        f"👤 Users (today): {vid_users_today:,} users\n"
+        "💎 PREMIUM:\n"
+        f"✅ Active Subs  : {active_prem:,}\n"
+        f"{pkg_block}\n"
+        f"⭐ Stars Today  : {stars_today:,}\n"
+        f"⭐ Active Stars : {stars_active:,}\n"
+        f"⭐ All-Time Stars: {stars_alltime:,}\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎯 TODAY'S ENGAGEMENT:\n"
-        f"🎁 Daily Claims: {daily_today:,} users\n"
-        f"🎬 Video Users : {vid_users_today:,} users\n"
+        "📹 VIDEOS:\n"
+        f"📦 Library      : {total_vids:,}\n"
+        f"▶️  Sent Today   : {vids_sent_today:,}\n"
+        f"▶️  Sent 7 Days  : {vids_sent_7d:,}\n"
+        f"👤 Users Today  : {vid_users_today:,}\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎯 ENGAGEMENT:\n"
+        f"🎁 Daily Claims : {daily_today:,}\n"
+        f"💰 Total Points : {total_pts:,}\n"
+        f"🏆 Top Referrer : {top_ref_name} ({top_ref_cnt} refs)\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📩 INBOX:\n"
+        f"📨 Today        : {inbox_today:,} messages\n"
+        f"📨 All-Time     : {inbox_total:,} messages\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏠 Groups       : {total_groups:,}\n"
         f"🕐 {now.strftime('%d %b %Y  %H:%M')} UTC\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "🤖 DESI MLH SYSTEM"

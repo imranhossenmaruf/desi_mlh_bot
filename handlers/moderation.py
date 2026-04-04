@@ -233,3 +233,263 @@ async def clearwarn_cmd(client: Client, message: Message):
         f"🗑️ <b>Warnings Cleared</b>  👤 {fname} <code>{user_id}</code>"
         f"  📍 {message.chat.title or message.chat.id}"
     ))
+
+# ─── /kick ────────────────────────────────────────────────────────────────────
+
+@app.on_message(filters.command("kick") & filters.group)
+async def kick_cmd(client: Client, message: Message):
+    if not await _is_admin_msg(client, message):
+        return
+
+    args = message.command[1:]
+    try:
+        user_id, fname, rest = await _resolve_target(client, message, list(args))
+    except ValueError as e:
+        m = await message.reply_text(str(e), parse_mode=HTML)
+        asyncio.create_task(_auto_del(m, 20))
+        return
+
+    reason = " ".join(rest) if rest else "No reason given"
+    try:
+        await client.ban_chat_member(message.chat.id, user_id)
+        await asyncio.sleep(1)
+        await client.unban_chat_member(message.chat.id, user_id)
+    except Exception as e:
+        m = await message.reply_text(f"❌ Could not kick: {e}")
+        asyncio.create_task(_auto_del(m, 15))
+        return
+
+    m = await message.reply_text(
+        f"👢 <b>User Kicked</b>\n"
+        f"👤 {fname} — <code>{user_id}</code>\n"
+        f"📋 Reason: {reason}",
+        parse_mode=HTML,
+    )
+    asyncio.create_task(_auto_del(m, 30))
+    asyncio.create_task(log_event(client,
+        f"👢 <b>Kicked</b>  👤 {fname} <code>{user_id}</code>"
+        f"  📋 {reason}  📍 {message.chat.title or message.chat.id}"
+    ))
+
+
+# ─── /del ─────────────────────────────────────────────────────────────────────
+
+@app.on_message(filters.command("del") & filters.group)
+async def del_cmd(client: Client, message: Message):
+    if not await _is_admin_msg(client, message):
+        return
+
+    replied = message.reply_to_message
+    if not replied:
+        m = await message.reply_text("❌ Reply to the message you want to delete.")
+        asyncio.create_task(_auto_del(m, 10))
+        return
+
+    try:
+        await replied.delete()
+    except Exception as e:
+        m = await message.reply_text(f"❌ Could not delete: {e}")
+        asyncio.create_task(_auto_del(m, 10))
+        return
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
+# ─── /ro — read-only restriction ──────────────────────────────────────────────
+
+@app.on_message(filters.command("ro") & filters.group)
+async def ro_cmd(client: Client, message: Message):
+    if not await _is_admin_msg(client, message):
+        return
+
+    args = message.command[1:]
+    try:
+        user_id, fname, remaining = await _resolve_target(client, message, list(args))
+    except ValueError as e:
+        m = await message.reply_text(str(e), parse_mode=HTML)
+        asyncio.create_task(_auto_del(m, 20))
+        return
+
+    if remaining:
+        secs, label = _parse_duration(remaining[0])
+    else:
+        secs, label = 3600, "1h"
+
+    until_date = (datetime.utcnow() + timedelta(seconds=secs)) if secs else None
+    try:
+        await client.restrict_chat_member(
+            message.chat.id, user_id,
+            ChatPermissions(
+                can_send_messages=False,
+                can_send_media_messages=False,
+                can_send_polls=False,
+                can_add_web_page_previews=False,
+                can_change_info=False,
+                can_invite_users=False,
+                can_pin_messages=False,
+            ),
+            until_date=until_date,
+        )
+    except Exception as e:
+        m = await message.reply_text(f"❌ Could not restrict: {e}")
+        asyncio.create_task(_auto_del(m, 15))
+        return
+
+    m = await message.reply_text(
+        f"👁 <b>Read-Only Mode</b>\n"
+        f"👤 {fname} — <code>{user_id}</code>\n"
+        f"⏱ Duration: {label}\n"
+        f"<i>User can read but not send messages.</i>",
+        parse_mode=HTML,
+    )
+    asyncio.create_task(_auto_del(m, 30))
+    asyncio.create_task(log_event(client,
+        f"👁 <b>Read-Only</b>  👤 {fname} <code>{user_id}</code>"
+        f"  ⏱ {label}  📍 {message.chat.title or message.chat.id}"
+    ))
+
+
+# ─── /pin ─────────────────────────────────────────────────────────────────────
+
+@app.on_message(filters.command("pin") & filters.group)
+async def pin_cmd(client: Client, message: Message):
+    if not await _is_admin_msg(client, message):
+        return
+
+    replied = message.reply_to_message
+    if not replied:
+        m = await message.reply_text("❌ Reply to the message you want to pin.")
+        asyncio.create_task(_auto_del(m, 10))
+        return
+
+    silent = "silent" in [a.lower() for a in message.command[1:]]
+    try:
+        await client.pin_chat_message(
+            message.chat.id, replied.id,
+            disable_notification=silent,
+        )
+    except Exception as e:
+        m = await message.reply_text(f"❌ Could not pin: {e}")
+        asyncio.create_task(_auto_del(m, 10))
+        return
+
+    m = await message.reply_text(
+        f"📌 <b>Message Pinned</b>"
+        + (" <i>(silent)</i>" if silent else ""),
+        parse_mode=HTML,
+    )
+    asyncio.create_task(_auto_del(m, 20))
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
+# ─── /unpin ───────────────────────────────────────────────────────────────────
+
+@app.on_message(filters.command("unpin") & filters.group)
+async def unpin_cmd(client: Client, message: Message):
+    if not await _is_admin_msg(client, message):
+        return
+
+    replied = message.reply_to_message
+    try:
+        if replied:
+            await client.unpin_chat_message(message.chat.id, replied.id)
+            note = "📌 Unpinned that message."
+        else:
+            await client.unpin_all_chat_messages(message.chat.id)
+            note = "📌 All pinned messages unpinned."
+    except Exception as e:
+        m = await message.reply_text(f"❌ Could not unpin: {e}")
+        asyncio.create_task(_auto_del(m, 10))
+        return
+
+    m = await message.reply_text(note, parse_mode=HTML)
+    asyncio.create_task(_auto_del(m, 20))
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
+# ─── /warns — check warning count ─────────────────────────────────────────────
+
+@app.on_message(filters.command("warns") & filters.group)
+async def warns_cmd(client: Client, message: Message):
+    args = message.command[1:]
+    replied = message.reply_to_message
+
+    if args or replied:
+        if not await _is_admin_msg(client, message):
+            return
+        try:
+            user_id, fname, _ = await _resolve_target(client, message, list(args))
+        except ValueError as e:
+            m = await message.reply_text(str(e), parse_mode=HTML)
+            asyncio.create_task(_auto_del(m, 20))
+            return
+    else:
+        user_id = message.from_user.id
+        fname   = message.from_user.first_name or str(user_id)
+
+    doc   = await users_col.find_one({"user_id": user_id})
+    warns = (doc or {}).get("warn_count", 0)
+
+    m = await message.reply_text(
+        f"⚠️ <b>Warnings</b>\n"
+        f"👤 {fname} — <code>{user_id}</code>\n"
+        f"📊 {warns}/{MAX_WARNS} warnings",
+        parse_mode=HTML,
+    )
+    asyncio.create_task(_auto_del(m, 30))
+
+
+# ─── /report — user reports a message to admin ────────────────────────────────
+
+@app.on_message(filters.command("report") & filters.group)
+async def report_cmd(client: Client, message: Message):
+    user    = message.from_user
+    if not user:
+        return
+
+    replied = message.reply_to_message
+    if not replied:
+        m = await message.reply_text(
+            "ℹ️ Reply to the message you want to report with /report.",
+            parse_mode=HTML,
+        )
+        asyncio.create_task(_auto_del(m, 15))
+        return
+
+    reporter_name = user.first_name or str(user.id)
+    target_user   = replied.from_user
+    target_name   = (target_user.first_name or str(target_user.id)) if target_user else "Unknown"
+    target_id     = target_user.id if target_user else "?"
+    chat_name     = message.chat.title or str(message.chat.id)
+    reason_args   = message.command[1:]
+    reason        = " ".join(reason_args) if reason_args else "No reason given"
+
+    asyncio.create_task(log_event(client,
+        f"🚨 <b>User Report</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📍 Group       : {chat_name}\n"
+        f"👤 Reporter    : {reporter_name} <code>{user.id}</code>\n"
+        f"🎯 Reported    : {target_name} <code>{target_id}</code>\n"
+        f"📋 Reason      : {reason}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━"
+    ))
+
+    m = await message.reply_text(
+        f"✅ <b>Report Submitted</b>\n"
+        f"<i>Admins have been notified. Thank you.</i>",
+        parse_mode=HTML,
+    )
+    asyncio.create_task(_auto_del(m, 15))
+    try:
+        await message.delete()
+    except Exception:
+        pass
