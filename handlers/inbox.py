@@ -4,7 +4,7 @@ import io
 import re
 from datetime import datetime, timedelta
 
-from pyrogram import Client, filters
+from pyrogram import Client, filters, StopPropagation
 from pyrogram.types import Message
 
 from config import (
@@ -287,7 +287,7 @@ async def inbox_group_reply(client: Client, message: Message):
 
 # ─── /chat — export conversation as CSV (private or inbox-group reply) ─────────
 
-@app.on_message(filters.command("chat") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("chat") & filters.user(ADMIN_ID), group=-2)
 async def chat_export_cmd(client: Client, message: Message):
     print(f"[CHAT] triggered  chat={message.chat.id}  args={message.command[1:]}")
     try:
@@ -391,11 +391,12 @@ async def chat_export_cmd(client: Client, message: Message):
             await message.reply_text(f"❌ Error: <code>{e}</code>", parse_mode=HTML)
         except Exception:
             pass
+    raise StopPropagation
 
 
 # ─── /inbox — list / export CSV / delete ──────────────────────────────────────
 
-@app.on_message(filters.command("inbox") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("inbox") & filters.user(ADMIN_ID), group=-2)
 async def inbox_cmd(client: Client, message: Message):
     print(f"[INBOX_CMD] triggered  chat={message.chat.id}  args={message.command[1:]}")
     try:
@@ -575,3 +576,4 @@ async def inbox_cmd(client: Client, message: Message):
             await message.reply_text(f"❌ Error: <code>{e}</code>", parse_mode=HTML)
         except Exception:
             pass
+    raise StopPropagation

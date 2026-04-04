@@ -142,7 +142,8 @@ async def welcome_new_member(client: Client, message: Message):
             )
             asyncio.create_task(_auto_del(m, 60))
         except Exception as e:
-            print(f"[WELCOME] Group msg failed: {e}")
+            if "CHAT_WRITE_FORBIDDEN" not in str(e):
+                print(f"[WELCOME] Group msg failed: {e}")
 
 
 @app.on_message(filters.command("setrules") & filters.group)
