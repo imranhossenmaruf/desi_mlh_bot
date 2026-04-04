@@ -43,6 +43,7 @@ VIDEO_REPEAT_DAYS = 7
 app = Client("telegram_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 BOT_USERNAME: str = ""
+MAIN_BOT_ID:  int = 0      # set at startup via app.get_me()
 
 REPLIES = {
     "hello":     "Hey there! 👋 How can I help you?",
