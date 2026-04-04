@@ -193,40 +193,75 @@ def kb_confirm():
     ])
 
 
+def _kb_to_json(reply_markup) -> dict | None:
+    """Convert Pyrogram InlineKeyboardMarkup → Bot API JSON dict."""
+    if reply_markup is None:
+        return None
+    rows = []
+    for row in reply_markup.inline_keyboard:
+        btn_row = []
+        for btn in row:
+            b = {"text": btn.text}
+            if btn.url:
+                b["url"] = btn.url
+            elif btn.callback_data:
+                b["callback_data"] = btn.callback_data
+            btn_row.append(b)
+        rows.append(btn_row)
+    return {"inline_keyboard": rows}
+
+
 async def _send_media(client: Client, chat_id: int, session: dict,
                       caption=None, caption_entities=None, reply_markup=None):
-    """Send media using file_id (preferred) or fallback to copy_message."""
+    """Send media via Bot API directly — avoids Pyrogram version quirks."""
     file_id    = session.get("file_id")
     media_kind = session.get("media_kind", "document")
-    kw = dict(caption=caption, caption_entities=caption_entities, reply_markup=reply_markup)
 
-    if file_id:
-        if media_kind == "photo":
-            return await client.send_photo(chat_id, photo=file_id, **kw)
-        elif media_kind == "video":
-            return await client.send_video(chat_id, video=file_id, **kw)
-        elif media_kind == "animation":
-            return await client.send_animation(chat_id, animation=file_id, **kw)
-        elif media_kind == "document":
-            return await client.send_document(chat_id, document=file_id, **kw)
-        elif media_kind == "audio":
-            return await client.send_audio(chat_id, audio=file_id, **kw)
-        elif media_kind == "voice":
-            return await client.send_voice(chat_id, voice=file_id, **kw)
-        elif media_kind == "sticker":
-            return await client.send_sticker(chat_id, sticker=file_id, reply_markup=reply_markup)
-        elif media_kind == "video_note":
-            return await client.send_video_note(chat_id, video_note=file_id, reply_markup=reply_markup)
+    print(f"[_send_media] chat={chat_id} kind={media_kind} fid={bool(file_id)} cap={bool(caption)}")
 
-    # Fallback: copy_message
-    return await client.copy_message(
-        chat_id=chat_id,
-        from_chat_id=session["media_chat_id"],
-        message_id=session["media_msg_id"],
-        caption=caption,
-        caption_entities=caption_entities,
-        reply_markup=reply_markup,
-    )
+    if not file_id:
+        # Fallback: copy_message (old path)
+        return await client.copy_message(
+            chat_id=chat_id,
+            from_chat_id=session["media_chat_id"],
+            message_id=session["media_msg_id"],
+            caption=caption,
+            reply_markup=reply_markup,
+        )
+
+    kb_json = _kb_to_json(reply_markup)
+
+    method_map = {
+        "photo":      ("sendPhoto",      "photo"),
+        "video":      ("sendVideo",      "video"),
+        "animation":  ("sendAnimation",  "animation"),
+        "document":   ("sendDocument",   "document"),
+        "audio":      ("sendAudio",      "audio"),
+        "voice":      ("sendVoice",      "voice"),
+        "sticker":    ("sendSticker",    "sticker"),
+        "video_note": ("sendVideoNote",  "video_note"),
+    }
+
+    if media_kind not in method_map:
+        media_kind = "document"
+
+    api_method, field_name = method_map[media_kind]
+    params = {"chat_id": chat_id, field_name: file_id}
+
+    # caption supported for most media types (not sticker/video_note)
+    if media_kind not in ("sticker", "video_note") and caption:
+        params["caption"] = caption
+
+    if kb_json:
+        params["reply_markup"] = kb_json
+
+    resp = await bot_api(api_method, params)
+    if resp.get("ok"):
+        # Return a minimal object with .id so preview_msg_id can be set
+        result = resp.get("result", {})
+        return type("FakeMsg", (), {"id": result.get("message_id")})()
+    else:
+        raise RuntimeError(f"Bot API {api_method} failed: {resp.get('description', 'unknown')}")
 
 
 async def refresh_preview(client: Client, session: dict):
