@@ -10,11 +10,35 @@ from config import (
     users_col, videos_col, vid_hist_col, premium_col, del_queue_col,
     app,
 )
-from helpers import get_bot_username, log_event, bot_api, _bot_token_ctx, BOT_TOKEN, get_cfg, admin_filter
+from helpers import get_bot_username, log_event, bot_api, _bot_token_ctx, BOT_TOKEN, get_cfg, admin_filter, _clone_config_ctx
+
+
+def _get_video_channel(client) -> int:
+    """Return the video channel for this client (clone or main)."""
+    cfg = getattr(client, "_clone_config", None) or _clone_config_ctx.get()
+    if cfg and cfg.get("video_channel"):
+        return cfg["video_channel"]
+    return VIDEO_CHANNEL
+
+
+def _get_bot_token(client) -> str:
+    """Return the bot token for this client (clone or main)."""
+    return getattr(client, "_bot_token", None) or _bot_token_ctx.get() or BOT_TOKEN
+
+
+async def _bot_api_for(client, method: str, params: dict) -> dict:
+    """Call Telegram Bot API using this client's token."""
+    import aiohttp
+    token = _get_bot_token(client)
+    url = f"https://api.telegram.org/bot{token}/{method}"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=params) as resp:
+            return await resp.json()
 
 
 async def _send_video_to_user(client: Client, user_id: int) -> str:
     today = datetime.utcnow().strftime("%Y-%m-%d")
+    video_channel = _get_video_channel(client)
 
     doc = await users_col.find_one({"user_id": user_id})
     if (doc or {}).get("bot_banned"):
@@ -67,7 +91,11 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
     seen_docs = vid_hist_col.find({"user_id": user_id, "sent_at": {"$gte": cutoff}})
     seen_ids  = {d["message_id"] async for d in seen_docs}
 
-    all_docs  = await videos_col.find({}).to_list(length=None)
+    # Filter by this bot's video channel (clone isolation)
+    all_docs  = await videos_col.find({"channel_id": video_channel}).to_list(length=None)
+    if not all_docs:
+        # Fallback: docs without channel_id (legacy/main bot)
+        all_docs  = await videos_col.find({}).to_list(length=None)
     pool      = [d for d in all_docs if d["message_id"] not in seen_ids]
 
     if not all_docs:
@@ -114,7 +142,7 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
 
         # Prefer sendVideo (guaranteed spoiler) over copyMessage (spoiler not reliable)
         if file_id:
-            resp = await bot_api("sendVideo", {
+            resp = await _bot_api_for(client, "sendVideo", {
                 "chat_id":          user_id,
                 "video":            file_id,
                 "caption":          caption,
@@ -124,9 +152,9 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
                 "supports_streaming": True,
             })
         else:
-            resp = await bot_api("copyMessage", {
+            resp = await _bot_api_for(client, "copyMessage", {
                 "chat_id":         user_id,
-                "from_chat_id":    get_cfg("video_channel", VIDEO_CHANNEL),
+                "from_chat_id":    video_channel,
                 "message_id":      msg_id,
                 "caption":         caption,
                 "has_spoiler":     True,
@@ -139,9 +167,9 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
             # If file_id is stale, fall back to copyMessage
             if file_id and ("file" in err_desc.lower() or "invalid" in err_desc.lower()):
                 await videos_col.update_one({"message_id": msg_id}, {"$unset": {"file_id": ""}})
-                resp = await bot_api("copyMessage", {
+                resp = await _bot_api_for(client, "copyMessage", {
                     "chat_id":         user_id,
-                    "from_chat_id":    get_cfg("video_channel", VIDEO_CHANNEL),
+                    "from_chat_id":    video_channel,
                     "message_id":      msg_id,
                     "caption":         caption,
                     "has_spoiler":     True,
@@ -156,7 +184,7 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
         sent_msg_id = resp.get("result", {}).get("message_id")
         if sent_msg_id:
             delete_at = datetime.utcnow() + timedelta(seconds=1500)
-            bot_token = _bot_token_ctx.get()
+            bot_token = _get_bot_token(client)
             await del_queue_col.insert_one({
                 "chat_id":   user_id,
                 "msg_id":    sent_msg_id,
@@ -260,7 +288,7 @@ async def video_handler_group(client: Client, message: Message):
         limit_str = str(raw_limit)
         remaining = str(max(0, raw_limit - vid_count))
 
-    total_vids = await videos_col.count_documents({})
+    total_vids = await videos_col.count_documents({"channel_id": _get_video_channel(client)})
     mention    = f'<a href="tg://user?id={user_id}">{fname}</a>' if user_id else fname
 
     btn = InlineKeyboardMarkup([[
@@ -304,7 +332,8 @@ async def video_handler_group(client: Client, message: Message):
 
 @app.on_message(filters.channel)
 async def channel_post_handler(client: Client, message: Message):
-    if message.chat.id != get_cfg("video_channel", VIDEO_CHANNEL):
+    video_channel = _get_video_channel(client)
+    if message.chat.id != video_channel:
         return
     if not message.video:
         return
@@ -312,7 +341,7 @@ async def channel_post_handler(client: Client, message: Message):
     exists = await videos_col.find_one({"message_id": message.id})
     if not exists:
         await videos_col.insert_one({
-            "channel_id": get_cfg("video_channel", VIDEO_CHANNEL),
+            "channel_id": video_channel,
             "message_id": message.id,
             "file_id":    file_id,
             "added_at":   datetime.utcnow(),
@@ -321,12 +350,12 @@ async def channel_post_handler(client: Client, message: Message):
         await videos_col.update_one(
             {"message_id": message.id}, {"$set": {"file_id": file_id}}
         )
-    total = await videos_col.count_documents({})
+    total = await videos_col.count_documents({"channel_id": video_channel})
     print(f"[VIDEO] Auto-saved new video msg={message.id}  total={total}")
 
     async def _log_with_video():
         from helpers import get_log_channel, bot_api as _bot_api
-        log_ch = await get_log_channel()
+        log_ch = await get_log_channel(client=client)
         if not log_ch:
             return
         from datetime import datetime as _dt
@@ -336,13 +365,13 @@ async def channel_post_handler(client: Client, message: Message):
             f"🎬 <b>New Video Posted in Channel</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"🎞 Video ID  : <code>{message.id}</code>\n"
-            f"📺 Channel   : <code>{get_cfg('video_channel', VIDEO_CHANNEL)}</code>\n"
+            f"📺 Channel   : <code>{video_channel}</code>\n"
             f"📦 Total DB  : <b>{total} video(s)</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"🤖 DESI MLH SYSTEM"
         )
         try:
-            await _bot_api("sendMessage", {
+            await _bot_api_for(client, "sendMessage", {
                 "chat_id":    log_ch,
                 "text":       text,
                 "parse_mode": "HTML",
@@ -358,15 +387,16 @@ async def channel_post_handler(client: Client, message: Message):
     & filters.forwarded & filters.video
 )
 async def admin_forward_video(client: Client, message: Message):
+    video_channel = _get_video_channel(client)
     fwd_chat = getattr(message, "forward_from_chat", None)
     fwd_id   = getattr(message, "forward_from_message_id", None)
-    if not fwd_chat or fwd_chat.id != get_cfg("video_channel", VIDEO_CHANNEL) or not fwd_id:
+    if not fwd_chat or fwd_chat.id != video_channel or not fwd_id:
         return
     file_id = message.video.file_id if message.video else None
     exists = await videos_col.find_one({"message_id": fwd_id})
     if not exists:
         await videos_col.insert_one({
-            "channel_id": get_cfg("video_channel", VIDEO_CHANNEL),
+            "channel_id": video_channel,
             "message_id": fwd_id,
             "file_id":    file_id,
             "added_at":   datetime.utcnow(),
@@ -375,7 +405,7 @@ async def admin_forward_video(client: Client, message: Message):
         await videos_col.update_one(
             {"message_id": fwd_id}, {"$set": {"file_id": file_id}}
         )
-    total = await videos_col.count_documents({})
+    total = await videos_col.count_documents({"channel_id": video_channel})
     await message.reply_text(
         f"✅ Video saved!\n📦 Total in library: {total}"
     )
@@ -384,7 +414,7 @@ async def admin_forward_video(client: Client, message: Message):
         f"📤 <b>Video Saved by Admin</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎞 Video ID  : <code>{fwd_id}</code>\n"
-        f"📺 Channel   : <code>{get_cfg('video_channel', VIDEO_CHANNEL)}</code>\n"
+        f"📺 Channel   : <code>{video_channel}</code>\n"
         f"🗃 Status    : {status_label}\n"
         f"📦 Total DB  : <b>{total} video(s)</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -395,7 +425,8 @@ async def admin_forward_video(client: Client, message: Message):
 @app.on_message(filters.command("syncvideos") & admin_filter & filters.private)
 async def syncvideos_cmd(client: Client, message: Message):
     """Backfill file_ids for all videos in DB that don't have one yet."""
-    docs = await videos_col.find({"file_id": {"$exists": False}}).to_list(length=None)
+    video_channel = _get_video_channel(client)
+    docs = await videos_col.find({"channel_id": video_channel, "file_id": {"$exists": False}}).to_list(length=None)
     if not docs:
         await message.reply_text("✅ All videos already have file_id stored. No sync needed.")
         return
@@ -412,9 +443,9 @@ async def syncvideos_cmd(client: Client, message: Message):
     for i, doc in enumerate(docs, 1):
         msg_id = doc["message_id"]
         try:
-            fwd = await bot_api("forwardMessage", {
+            fwd = await _bot_api_for(client, "forwardMessage", {
                 "chat_id":      ADMIN_ID,
-                "from_chat_id": get_cfg("video_channel", VIDEO_CHANNEL),
+                "from_chat_id": video_channel,
                 "message_id":   msg_id,
             })
             if fwd.get("ok"):
@@ -430,7 +461,7 @@ async def syncvideos_cmd(client: Client, message: Message):
                 else:
                     fail_cnt += 1
                 if fwd_mid:
-                    await bot_api("deleteMessage", {
+                    await _bot_api_for(client, "deleteMessage", {
                         "chat_id": ADMIN_ID, "message_id": fwd_mid
                     })
             else:
@@ -458,7 +489,11 @@ async def syncvideos_cmd(client: Client, message: Message):
 
 @app.on_message(filters.command("listvideos") & admin_filter & filters.private)
 async def listvideos_cmd(client: Client, message: Message):
-    docs = await videos_col.find({}).sort("added_at", 1).to_list(length=None)
+    video_channel = _get_video_channel(client)
+    docs = await videos_col.find({"channel_id": video_channel}).sort("added_at", 1).to_list(length=None)
+    if not docs:
+        # Fallback: legacy docs without channel_id
+        docs = await videos_col.find({}).sort("added_at", 1).to_list(length=None)
     total = len(docs)
     if not total:
         await message.reply_text("📭 No videos in the database.")
@@ -493,13 +528,16 @@ async def delvideo_cmd(client: Client, message: Message):
 
     query = args[0]
 
+    video_channel = _get_video_channel(client)
     if query.startswith("#") or query.isdigit():
         num_str = query.lstrip("#")
         if not num_str.isdigit():
             await message.reply_text("❌ Invalid number. Example: <code>/delvideo #3</code>", parse_mode=HTML)
             return
         idx = int(num_str) - 1
-        docs = await videos_col.find({}).sort("added_at", 1).to_list(length=None)
+        docs = await videos_col.find({"channel_id": video_channel}).sort("added_at", 1).to_list(length=None)
+        if not docs:
+            docs = await videos_col.find({}).sort("added_at", 1).to_list(length=None)
         if idx < 0 or idx >= len(docs):
             await message.reply_text(f"❌ No video #{num_str} found. Use /listvideos to see the list.")
             return
@@ -513,7 +551,7 @@ async def delvideo_cmd(client: Client, message: Message):
 
     result = await videos_col.delete_one({"message_id": msg_id})
     if result.deleted_count:
-        remaining = await videos_col.count_documents({})
+        remaining = await videos_col.count_documents({"channel_id": video_channel})
         await message.reply_text(
             f"✅ <b>Video Deleted</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -542,7 +580,8 @@ async def delvideo_cmd(client: Client, message: Message):
 @app.on_message(filters.command("clearvideos") & admin_filter & filters.private)
 async def clearvideos_cmd(client: Client, message: Message):
     args  = message.command[1:]
-    total = await videos_col.count_documents({})
+    video_channel = _get_video_channel(client)
+    total = await videos_col.count_documents({"channel_id": video_channel})
 
     if total == 0:
         await message.reply_text("📭 Video library is already empty.")
@@ -559,7 +598,7 @@ async def clearvideos_cmd(client: Client, message: Message):
         )
         return
 
-    result = await videos_col.delete_many({})
+    result = await videos_col.delete_many({"channel_id": video_channel})
     await message.reply_text(
         f"🧹 <b>Video Library Cleared</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
