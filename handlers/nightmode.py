@@ -1,31 +1,11 @@
 import asyncio
 from datetime import datetime, timezone, timedelta
 
-from pyrogram import Client, filters, enums
-from pyrogram.types import Message, ChatPermissions
+from pyrogram import Client, filters
+from pyrogram.types import Message
 
 from config import HTML, ADMIN_ID, nightmode_col, app
-from helpers import log_event, _is_admin_msg
-
-_NIGHT_RESTRICTED = ChatPermissions(
-    can_send_messages        = False,
-    can_send_media_messages  = False,
-    can_send_polls           = False,
-    can_add_web_page_previews= False,
-    can_change_info          = False,
-    can_invite_users         = False,
-    can_pin_messages         = False,
-)
-
-_NIGHT_OPEN = ChatPermissions(
-    can_send_messages        = True,
-    can_send_media_messages  = True,
-    can_send_polls           = True,
-    can_add_web_page_previews= True,
-    can_change_info          = False,
-    can_invite_users         = True,
-    can_pin_messages         = False,
-)
+from helpers import log_event, _is_admin_msg, bot_api
 
 BST = timezone(timedelta(hours=6))
 
@@ -61,13 +41,18 @@ async def nightmode_cmd(client: Client, message: Message):
     if sub == "off":
         await nightmode_col.update_one(
             {"chat_id": message.chat.id},
-            {"$set": {"enabled": False}},
+            {"$set": {"enabled": False, "is_restricted": False}},
             upsert=True,
         )
-        try:
-            await client.set_chat_permissions(message.chat.id, _NIGHT_OPEN)
-        except Exception:
-            pass
+        await bot_api("setChatPermissions", {
+            "chat_id": message.chat.id,
+            "permissions": {
+                "can_send_messages": True, "can_send_media_messages": True,
+                "can_send_polls": True, "can_add_web_page_previews": True,
+                "can_change_info": False, "can_invite_users": True,
+                "can_pin_messages": False,
+            }
+        })
         await message.reply_text("☀️ <b>Night Mode disabled.</b> Chat is now open.", parse_mode=HTML)
         return
 
@@ -128,6 +113,18 @@ async def nightmode_cmd(client: Client, message: Message):
     )
 
 
+_RESTRICTED_PERMS = {
+    "can_send_messages": False, "can_send_media_messages": False,
+    "can_send_polls": False, "can_add_web_page_previews": False,
+    "can_change_info": False, "can_invite_users": False, "can_pin_messages": False,
+}
+_OPEN_PERMS = {
+    "can_send_messages": True, "can_send_media_messages": True,
+    "can_send_polls": True, "can_add_web_page_previews": True,
+    "can_change_info": False, "can_invite_users": True, "can_pin_messages": False,
+}
+
+
 async def nightmode_loop(client: Client):
     print("[NIGHTMODE] Loop started.")
     while True:
@@ -137,49 +134,40 @@ async def nightmode_loop(client: Client):
             docs    = await nightmode_col.find({"enabled": True}).to_list(length=None)
             for doc in docs:
                 chat_id = doc["chat_id"]
-                sh, sm  = doc["start_h"], doc["start_m"]
-                eh, em  = doc["end_h"],   doc["end_m"]
+                sh, sm  = doc.get("start_h", 23), doc.get("start_m", 0)
+                eh, em  = doc.get("end_h", 6),   doc.get("end_m", 0)
 
-                is_night_time = _in_night_window(h, m, sh, sm, eh, em)
-                current_perms_restricted = doc.get("is_restricted", False)
+                is_night_time        = _in_night_window(h, m, sh, sm, eh, em)
+                currently_restricted = doc.get("is_restricted", False)
 
-                if is_night_time and not current_perms_restricted:
-                    try:
-                        await client.set_chat_permissions(chat_id, _NIGHT_RESTRICTED)
+                if is_night_time and not currently_restricted:
+                    r = await bot_api("setChatPermissions", {
+                        "chat_id": chat_id, "permissions": _RESTRICTED_PERMS
+                    })
+                    if r.get("ok") or "CHAT_NOT_MODIFIED" in str(r):
                         await nightmode_col.update_one(
                             {"chat_id": chat_id}, {"$set": {"is_restricted": True}}
                         )
-                        try:
-                            await client.send_message(
-                                chat_id,
-                                "🌙 <b>Night Mode Activated</b>\n"
-                                f"Chat will reopen at {eh:02d}:{em:02d} BST.",
-                                parse_mode=HTML,
-                            )
-                        except Exception:
-                            pass
+                        await bot_api("sendMessage", {
+                            "chat_id": chat_id, "parse_mode": "HTML",
+                            "text": f"🌙 <b>Night Mode Activated</b>\n"
+                                    f"Chat will reopen at {eh:02d}:{em:02d} BST.",
+                        })
                         print(f"[NIGHTMODE] Closed chat={chat_id}")
-                    except Exception as e:
-                        if "CHAT_NOT_MODIFIED" not in str(e):
-                            print(f"[NIGHTMODE] Could not restrict {chat_id}: {e}")
 
-                elif not is_night_time and current_perms_restricted:
-                    try:
-                        await client.set_chat_permissions(chat_id, _NIGHT_OPEN)
+                elif not is_night_time and currently_restricted:
+                    r = await bot_api("setChatPermissions", {
+                        "chat_id": chat_id, "permissions": _OPEN_PERMS
+                    })
+                    if r.get("ok") or "CHAT_NOT_MODIFIED" in str(r):
                         await nightmode_col.update_one(
                             {"chat_id": chat_id}, {"$set": {"is_restricted": False}}
                         )
-                        try:
-                            await client.send_message(
-                                chat_id,
-                                "☀️ <b>Night Mode Ended</b>\nChat is now open!",
-                                parse_mode=HTML,
-                            )
-                        except Exception:
-                            pass
+                        await bot_api("sendMessage", {
+                            "chat_id": chat_id, "parse_mode": "HTML",
+                            "text": "☀️ <b>Night Mode Ended</b>\nChat is now open!",
+                        })
                         print(f"[NIGHTMODE] Opened chat={chat_id}")
-                    except Exception as e:
-                        print(f"[NIGHTMODE] Could not open {chat_id}: {e}")
         except Exception as e:
             print(f"[NIGHTMODE] Loop error: {e}")
         await asyncio.sleep(60)
