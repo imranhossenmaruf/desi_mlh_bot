@@ -69,32 +69,56 @@ async def welcome_cmd(client: Client, message: Message):
     )
 
 
-@app.on_message(filters.new_chat_members)
+@app.on_message(filters.new_chat_members, group=5)
 async def welcome_new_member(client: Client, message: Message):
-    chat_id = message.chat.id
-    doc     = await welcome_col.find_one({"chat_id": chat_id})
-    if not doc or not doc.get("enabled"):
-        return
-
-    template = doc.get("text", "Welcome {name} to {group}!")
+    chat_id     = message.chat.id
+    doc         = await welcome_col.find_one({"chat_id": chat_id})
     group_title = message.chat.title or "the group"
 
     for user in message.new_chat_members:
         if user.is_bot:
             continue
+
         name = user.first_name or "User"
-        text = template.replace("{name}", name).replace("{group}", group_title)
+
+        # ── Group welcome (custom or default) ────────────────────────────────
+        if doc and doc.get("enabled"):
+            template = doc.get("text", "Welcome {name} to {group}!")
+            grp_text = template.replace("{name}", name).replace("{group}", group_title)
+        else:
+            grp_text = (
+                f"👋 Welcome, <b>{name}</b>!\n\n"
+                f"Glad to have you in <b>{group_title}</b>. "
+                f"Feel free to start chatting! 🎉"
+            )
+
         try:
-            m = await client.send_message(chat_id, text, parse_mode=HTML)
-            async def _del(msg=m):
-                await asyncio.sleep(120)
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
-            asyncio.create_task(_del())
+            m = await client.send_message(chat_id, grp_text, parse_mode=HTML)
+            asyncio.create_task(_auto_del(m, 120))
         except Exception as e:
-            print(f"[WELCOME] Send failed: {e}")
+            print(f"[WELCOME] Group msg failed: {e}")
+
+        # ── DM welcome ────────────────────────────────────────────────────────
+        try:
+            bot_username = ""
+            try:
+                me = await client.get_me()
+                bot_username = me.username or ""
+            except Exception:
+                pass
+
+            dm_text = (
+                f"👋 <b>Welcome to {group_title}, {name}!</b>\n\n"
+                f"I'm the group assistant bot. Here's what I can do for you:\n\n"
+                f"🎬 <b>/video</b> — Watch exclusive videos\n"
+                f"🎁 <b>/daily</b> — Claim daily bonus\n"
+                f"💎 <b>/buypremium</b> — Unlock premium features\n"
+                f"👤 <b>/profile</b> — View your profile\n\n"
+                f"Type /start to register and get full access!"
+            )
+            await client.send_message(user.id, dm_text, parse_mode=HTML)
+        except Exception:
+            pass  # user hasn't started the bot yet — silent fail is correct
 
 
 @app.on_message(filters.command("setrules") & filters.group)

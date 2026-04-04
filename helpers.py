@@ -8,7 +8,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 
 from config import (
     HTML, BOT_TOKEN, ADMIN_ID,
-    users_col, settings_col, scheduled_col,
+    users_col, settings_col, scheduled_col, groups_col,
     broadcast_sessions,
     STATE_CUSTOMIZE,
 )
@@ -400,19 +400,39 @@ async def do_broadcast(client: Client, session: dict, status_msg: Message):
     except Exception:
         pass
 
+    # ── Also broadcast to all groups where bot is a member ────────────────────
+    group_sent = group_failed = 0
+    try:
+        group_docs = await groups_col.find({}).to_list(length=None)
+        for gdoc in group_docs:
+            gid = gdoc.get("chat_id")
+            if not gid:
+                continue
+            try:
+                await send_to_user(client, gid, session, reply_markup=extra_kb)
+                group_sent += 1
+            except Exception as _gerr:
+                print(f"[BROADCAST] group={gid} FAILED: {_gerr}")
+                group_failed += 1
+            await asyncio.sleep(0.1)
+    except Exception as _ge:
+        print(f"[BROADCAST] Group loop error: {_ge}")
+
     aud = audience_label(session)
+    group_line = f"📣 Groups: <b>{group_sent:,}</b> sent, <b>{group_failed:,}</b> failed\n" if (group_sent + group_failed) > 0 else ""
     await status_msg.edit_text(
         "✅ <b>Broadcast Sent Successfully!</b>\n\n"
-        f"📨 Delivered to <b>{sent:,} users.</b>\n"
-        f"❌ Failed / Blocked: <b>{failed:,}</b>\n\n"
-        "Use /broadcast to start a new broadcast anytime.",
+        f"📨 Users: <b>{sent:,}</b> delivered, <b>{failed:,}</b> failed\n"
+        f"{group_line}"
+        "\nUse /broadcast to start a new broadcast anytime.",
         parse_mode=HTML,
     )
     broadcast_sessions.pop(ADMIN_ID, None)
     await log_event(client,
         f"📢 <b>Broadcast Completed</b>\n"
         f"👥 Filter: {aud}\n"
-        f"✅ Sent: <b>{sent:,}</b>  ❌ Failed: <b>{failed:,}</b>"
+        f"✅ Users: <b>{sent:,}</b>  ❌ Failed: <b>{failed:,}</b>\n"
+        f"📣 Groups: <b>{group_sent:,}</b> sent, <b>{group_failed:,}</b> failed"
     )
 
 

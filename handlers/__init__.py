@@ -14,4 +14,5 @@ from handlers import (
     welcome,
     misc,
     inbox,
+    groups,
 )

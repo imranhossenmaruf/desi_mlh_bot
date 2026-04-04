@@ -25,6 +25,7 @@ welcome_col    = db["welcome_messages"]
 rules_col      = db["group_rules"]
 premium_col    = db["premium_users"]
 inbox_col      = db["inbox_messages"]
+groups_col     = db["bot_groups"]
 
 API_ID    = int(os.environ["TELEGRAM_API_ID"])
 API_HASH  = os.environ["TELEGRAM_API_HASH"]
