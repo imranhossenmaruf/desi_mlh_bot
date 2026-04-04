@@ -208,15 +208,14 @@ async def user_msg_to_inbox(client: Client, message: Message):
 async def inbox_group_reply(client: Client, message: Message):
     try:
         inbox_id = await _get_inbox_group()
-        if not inbox_id or message.chat.id != inbox_id:
+        if not inbox_id:
+            return
+        if message.chat.id != inbox_id:
             return
 
+        # Only process reply messages
         replied = message.reply_to_message
         if not replied:
-            return
-
-        sender_id = getattr(message.from_user, "id", None)
-        if not sender_id:
             return
 
         # Skip bot commands — handled by their own handlers
@@ -224,12 +223,20 @@ async def inbox_group_reply(client: Client, message: Message):
         if raw_text.startswith("/"):
             return
 
+        print(f"[INBOX_REPLY] chat={message.chat.id} replied_to={replied.id} text={bool(message.text)}")
+
+        # ── Find who this reply is for ──────────────────────────────────────
+        # Primary lookup: by inbox_msg_id + group_id
         mapping = await inbox_col.find_one({
             "inbox_msg_id": replied.id,
             "group_id":     inbox_id,
         })
+        # Fallback: by inbox_msg_id only (handles group_id type mismatch)
         if not mapping:
-            print(f"[INBOX] No mapping for replied_msg={replied.id}")
+            mapping = await inbox_col.find_one({"inbox_msg_id": replied.id})
+
+        if not mapping:
+            print(f"[INBOX_REPLY] No mapping for replied_msg={replied.id} — ignoring")
             return
 
         target_uid   = mapping["user_id"]
@@ -237,31 +244,81 @@ async def inbox_group_reply(client: Client, message: Message):
         target_uname = mapping.get("username", "")
         content, msg_type = _msg_content_and_type(message)
 
-        ok = False
+        # ── Send to user ─────────────────────────────────────────────────────
+        ok  = False
+        err = ""
         if message.text:
-            r = await bot_api("sendMessage", {"chat_id": target_uid, "text": message.text})
+            r = await bot_api("sendMessage", {
+                "chat_id": target_uid,
+                "text":    message.text,
+                "parse_mode": "HTML",
+            })
             ok = r.get("ok", False)
+            err = r.get("description", "")
         elif message.photo:
-            r = await bot_api("sendPhoto", {"chat_id": target_uid, "photo": message.photo.file_id, "caption": message.caption or ""})
+            r = await bot_api("sendPhoto", {
+                "chat_id": target_uid,
+                "photo":   message.photo.file_id,
+                "caption": message.caption or "",
+                "parse_mode": "HTML",
+            })
             ok = r.get("ok", False)
+            err = r.get("description", "")
         elif message.video:
-            r = await bot_api("sendVideo", {"chat_id": target_uid, "video": message.video.file_id, "caption": message.caption or ""})
+            r = await bot_api("sendVideo", {
+                "chat_id": target_uid,
+                "video":   message.video.file_id,
+                "caption": message.caption or "",
+                "parse_mode": "HTML",
+            })
             ok = r.get("ok", False)
+            err = r.get("description", "")
         elif message.document:
-            r = await bot_api("sendDocument", {"chat_id": target_uid, "document": message.document.file_id, "caption": message.caption or ""})
+            r = await bot_api("sendDocument", {
+                "chat_id":  target_uid,
+                "document": message.document.file_id,
+                "caption":  message.caption or "",
+                "parse_mode": "HTML",
+            })
             ok = r.get("ok", False)
+            err = r.get("description", "")
         elif message.voice:
-            r = await bot_api("sendVoice", {"chat_id": target_uid, "voice": message.voice.file_id})
+            r = await bot_api("sendVoice", {
+                "chat_id": target_uid,
+                "voice":   message.voice.file_id,
+            })
             ok = r.get("ok", False)
+            err = r.get("description", "")
         elif message.audio:
-            r = await bot_api("sendAudio", {"chat_id": target_uid, "audio": message.audio.file_id, "caption": message.caption or ""})
+            r = await bot_api("sendAudio", {
+                "chat_id": target_uid,
+                "audio":   message.audio.file_id,
+                "caption": message.caption or "",
+                "parse_mode": "HTML",
+            })
             ok = r.get("ok", False)
+            err = r.get("description", "")
         elif message.sticker:
-            r = await bot_api("sendSticker", {"chat_id": target_uid, "sticker": message.sticker.file_id})
+            r = await bot_api("sendSticker", {
+                "chat_id": target_uid,
+                "sticker": message.sticker.file_id,
+            })
             ok = r.get("ok", False)
+            err = r.get("description", "")
+        elif message.video_note:
+            r = await bot_api("sendVideoNote", {
+                "chat_id":    target_uid,
+                "video_note": message.video_note.file_id,
+            })
+            ok = r.get("ok", False)
+            err = r.get("description", "")
         else:
-            r = await bot_api("sendMessage", {"chat_id": target_uid, "text": "📎 (Unsupported message type)"})
+            r = await bot_api("sendMessage", {
+                "chat_id": target_uid,
+                "text":    "📎 Admin sent a message (unsupported type in inbox).",
+            })
             ok = r.get("ok", False)
+            err = r.get("description", "")
 
         if ok:
             await _save_msg(target_uid, target_name, target_uname, "out", content, msg_type)
@@ -271,18 +328,29 @@ async def inbox_group_reply(client: Client, message: Message):
                     "message_id": message.id,
                     "reaction":   [{"type": "emoji", "emoji": "👍"}],
                 })
-            except Exception as re_err:
-                print(f"[INBOX] Reaction failed: {re_err}")
-            print(f"[INBOX] Admin reply → user={target_uid} ok")
+            except Exception:
+                pass
+            print(f"[INBOX_REPLY] ✅ Delivered to user={target_uid}")
         else:
+            print(f"[INBOX_REPLY] ❌ Failed to deliver user={target_uid} err={err}")
+            uname_str = f"@{target_uname}" if target_uname else str(target_uid)
+            note = ""
+            if "blocked" in err.lower():
+                note = "\n<i>User has blocked the bot.</i>"
+            elif "not found" in err.lower() or "deactivated" in err.lower():
+                note = "\n<i>User account not found or deactivated.</i>"
             m = await message.reply_text(
-                f"❌ Failed to deliver to <code>{target_uid}</code>",
+                f"❌ <b>Delivery Failed</b>\n"
+                f"👤 {target_name} ({uname_str})\n"
+                f"📛 {err}{note}",
                 parse_mode=HTML,
             )
-            asyncio.create_task(_auto_del(m, 10))
+            asyncio.create_task(_auto_del(m, 15))
 
     except Exception as e:
-        print(f"[INBOX] inbox_group_reply error: {e}")
+        import traceback
+        print(f"[INBOX_REPLY] EXCEPTION: {e}")
+        traceback.print_exc()
 
 
 # ─── /chat — export conversation as CSV (private or inbox-group reply) ─────────
