@@ -1,90 +1,10 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from pyrogram import Client
-from pyrogram.types import ChatPermissions
 
-from config import (
-    HTML, ADMIN_ID,
-    nightmode_col, scheduled_col,
-)
-from helpers import log_event, do_broadcast
-
-_NIGHT_RESTRICTED = ChatPermissions(
-    can_send_messages        = False,
-    can_send_media_messages  = False,
-    can_send_polls           = False,
-    can_add_web_page_previews= False,
-    can_change_info          = False,
-    can_invite_users         = False,
-    can_pin_messages         = False,
-)
-
-_NIGHT_OPEN = ChatPermissions(
-    can_send_messages        = True,
-    can_send_media_messages  = True,
-    can_send_polls           = True,
-    can_add_web_page_previews= True,
-    can_change_info          = False,
-    can_invite_users         = True,
-    can_pin_messages         = False,
-)
-
-
-async def nightmode_loop(client: Client):
-    """Background task: enforces night mode every 60 seconds."""
-    print("[NIGHTMODE] Loop started.")
-    while True:
-        try:
-            await asyncio.sleep(60)
-            now_utc = datetime.utcnow()
-            now_min = now_utc.hour * 60 + now_utc.minute
-
-            docs = await nightmode_col.find({"enabled": True}).to_list(length=100)
-            for doc in docs:
-                chat_id         = doc["chat_id"]
-                sh              = doc["start_h_utc"] * 60 + doc["start_m_utc"]
-                eh              = doc["end_h_utc"]   * 60 + doc["end_m_utc"]
-                currently_night = doc.get("is_night", False)
-
-                if sh < eh:
-                    in_night = sh <= now_min < eh
-                else:
-                    in_night = now_min >= sh or now_min < eh
-
-                if in_night and not currently_night:
-                    try:
-                        await client.set_chat_permissions(chat_id, _NIGHT_RESTRICTED)
-                        await nightmode_col.update_one(
-                            {"chat_id": chat_id}, {"$set": {"is_night": True}}
-                        )
-                        await client.send_message(
-                            chat_id,
-                            f"🌙 <b>Night Mode ON</b>\n"
-                            f"Group is now restricted until {doc['end_h']:02d}:{doc['end_m']:02d} BST.\n"
-                            "Only admins can post. Good night! 😴",
-                            parse_mode=HTML,
-                        )
-                        print(f"[NIGHTMODE] Activated for chat={chat_id}")
-                    except Exception as e:
-                        print(f"[NIGHTMODE] Error activating {chat_id}: {e}")
-
-                elif not in_night and currently_night:
-                    try:
-                        await client.set_chat_permissions(chat_id, _NIGHT_OPEN)
-                        await nightmode_col.update_one(
-                            {"chat_id": chat_id}, {"$set": {"is_night": False}}
-                        )
-                        await client.send_message(
-                            chat_id,
-                            "☀️ <b>Night Mode OFF</b>\nGroup is now open. Good morning! 🌅",
-                            parse_mode=HTML,
-                        )
-                        print(f"[NIGHTMODE] Deactivated for chat={chat_id}")
-                    except Exception as e:
-                        print(f"[NIGHTMODE] Error deactivating {chat_id}: {e}")
-        except Exception as e:
-            print(f"[NIGHTMODE] Loop error: {e}")
+from config import HTML, ADMIN_ID, scheduled_col
+from helpers import log_event, do_broadcast, bot_api
 
 
 async def _run_scheduled(client: Client, session: dict, status_msg, doc_id, label: str):
