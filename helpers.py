@@ -152,6 +152,10 @@ def kb_customize(extra_buttons=None, mode: str = "broadcast"):
         InlineKeyboardButton("➕ Add Button",   callback_data="bc_add_button"),
         InlineKeyboardButton("🖼 Attach Media", callback_data="bc_attach_media"),
     ])
+    rows.append([
+        InlineKeyboardButton("💎 + Buy Premium", callback_data="bc_quick_buypremium"),
+        InlineKeyboardButton("👤 + My Profile",  callback_data="bc_quick_profile"),
+    ])
     if mode == "sbc":
         rows.append([
             InlineKeyboardButton("👁 Preview",          callback_data="bc_preview"),

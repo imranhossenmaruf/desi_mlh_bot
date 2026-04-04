@@ -150,6 +150,43 @@ async def bc_attach_media(client: Client, cq: CallbackQuery):
     await cq.answer()
 
 
+async def _add_quick_button(client, cq, label, url):
+    session = broadcast_sessions.get(ADMIN_ID)
+    if not session or session["state"] != STATE_CUSTOMIZE:
+        return await cq.answer("No active session.", show_alert=True)
+    existing = session.get("extra_buttons") or []
+    new_btn   = {"text": label, "url": url}
+    for row in existing:
+        if any(b["url"] == url for b in row):
+            return await cq.answer("Already added!", show_alert=True)
+    existing.append([new_btn])
+    session["extra_buttons"] = existing
+    await cq.answer(f"✅ '{label}' button added!")
+    await refresh_preview(client, session)
+
+
+@app.on_callback_query(filters.regex("^bc_quick_buypremium$") & filters.user(ADMIN_ID))
+async def bc_quick_buypremium(client: Client, cq: CallbackQuery):
+    from config import app as _app
+    bot_username = (await _app.get_me()).username
+    await _add_quick_button(
+        client, cq,
+        "💎 Buy Premium",
+        f"https://t.me/{bot_username}?start=buypremium"
+    )
+
+
+@app.on_callback_query(filters.regex("^bc_quick_profile$") & filters.user(ADMIN_ID))
+async def bc_quick_profile(client: Client, cq: CallbackQuery):
+    from config import app as _app
+    bot_username = (await _app.get_me()).username
+    await _add_quick_button(
+        client, cq,
+        "👤 My Profile",
+        f"https://t.me/{bot_username}?start=profile"
+    )
+
+
 @app.on_callback_query(filters.regex("^bc_remove_buttons$") & filters.user(ADMIN_ID))
 async def bc_remove_buttons(client: Client, cq: CallbackQuery):
     session = broadcast_sessions.get(ADMIN_ID)

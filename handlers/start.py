@@ -86,6 +86,16 @@ async def start_handler(client: Client, message: Message):
             await message.reply_text(err)
         return
 
+    if start_param == "buypremium":
+        from handlers.premium import buypremium_cmd
+        await buypremium_cmd(client, message)
+        return
+
+    if start_param == "profile":
+        from handlers.user import profile_cmd
+        await profile_cmd(client, message)
+        return
+
     mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
     uname   = f"@{user.username}" if user.username else "no username"
 
@@ -201,9 +211,9 @@ async def start_handler(client: Client, message: Message):
         )
 
     _share_text = (
-        "░▒▓█ 🔥 DIAMOND BOT ACCESS 🔥 █▓▒░\n"
-        "🎬 Premium commands live now\n"
-        "💌 Click & Enter\n"
+        "░▒▓█ 🔥 DIAMOND BOT ACCESS 🔥 █▓▒░\n\n"
+        "🎬 Premium commands live now\n\n"
+        "💌 Click & Enter\n\n"
         "✨ For true enthusiasts only\n\n"
         f"https://t.me/{bot_username}?start=video"
     )
