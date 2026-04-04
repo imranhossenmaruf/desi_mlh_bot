@@ -140,46 +140,50 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
             "🤖 DESI MLH SYSTEM"
         )
 
-        # Prefer sendVideo (guaranteed spoiler) over copyMessage (spoiler not reliable)
-        if file_id:
-            resp = await _bot_api_for(client, "sendVideo", {
-                "chat_id":          user_id,
-                "video":            file_id,
-                "caption":          caption,
-                "parse_mode":       "HTML",
-                "has_spoiler":      True,
-                "protect_content":  True,
-                "supports_streaming": True,
-            })
-        else:
-            resp = await _bot_api_for(client, "copyMessage", {
-                "chat_id":         user_id,
-                "from_chat_id":    video_channel,
-                "message_id":      msg_id,
-                "caption":         caption,
-                "has_spoiler":     True,
-                "protect_content": True,
-            })
+        # ── Strategy: copyMessage FIRST (guaranteed spoiler), sendVideo as fallback ──
+        # sendVideo with an existing file_id does NOT reliably apply has_spoiler
+        # because Telegram ignores the flag for pre-existing file references.
+        # copyMessage always creates a fresh copy with the spoiler applied.
+
+        resp = await _bot_api_for(client, "copyMessage", {
+            "chat_id":         user_id,
+            "from_chat_id":    video_channel,
+            "message_id":      msg_id,
+            "caption":         caption,
+            "parse_mode":      "HTML",
+            "has_spoiler":     True,
+            "protect_content": True,
+        })
 
         if not resp.get("ok"):
-            err_desc = resp.get("description", "")
-            print(f"[VIDEO] send failed (file_id={'yes' if file_id else 'no'}): {err_desc}")
-            # If file_id is stale, fall back to copyMessage
-            if file_id and ("file" in err_desc.lower() or "invalid" in err_desc.lower()):
-                await videos_col.update_one({"message_id": msg_id}, {"$unset": {"file_id": ""}})
-                resp = await _bot_api_for(client, "copyMessage", {
-                    "chat_id":         user_id,
-                    "from_chat_id":    video_channel,
-                    "message_id":      msg_id,
-                    "caption":         caption,
-                    "has_spoiler":     True,
-                    "protect_content": True,
+            copy_err = resp.get("description", "")
+            print(f"[VIDEO] copyMessage failed: {copy_err} — trying sendVideo with file_id")
+
+            # Fallback: sendVideo with stored file_id (bot must own this file_id)
+            if file_id:
+                resp = await _bot_api_for(client, "sendVideo", {
+                    "chat_id":            user_id,
+                    "video":              file_id,
+                    "caption":            caption,
+                    "parse_mode":         "HTML",
+                    "has_spoiler":        True,
+                    "protect_content":    True,
+                    "supports_streaming": True,
                 })
-            if not resp.get("ok"):
-                err_desc2 = resp.get("description", "")
-                if "not found" in err_desc2.lower() or "invalid" in err_desc2.lower():
+                if not resp.get("ok"):
+                    fid_err = resp.get("description", "")
+                    print(f"[VIDEO] sendVideo also failed: {fid_err}")
+                    # Stale file_id — remove it so copyMessage is used next time
+                    if "file" in fid_err.lower() or "invalid" in fid_err.lower() or "wrong" in fid_err.lower():
+                        await videos_col.update_one({"message_id": msg_id}, {"$unset": {"file_id": ""}})
+                    if "not found" in copy_err.lower() or "message to copy not found" in copy_err.lower():
+                        await videos_col.delete_one({"message_id": msg_id})
+                        print(f"[VIDEO] msg={msg_id} not found in channel, removed from DB")
+                    return "❌ Could not send the video. Please try again."
+            else:
+                if "not found" in copy_err.lower() or "message to copy not found" in copy_err.lower():
                     await videos_col.delete_one({"message_id": msg_id})
-                    print(f"[VIDEO] msg={msg_id} not found, removed from DB")
+                    print(f"[VIDEO] msg={msg_id} not found in channel, removed from DB")
                 return "❌ Could not send the video. Please try again."
         sent_msg_id = resp.get("result", {}).get("message_id")
         if sent_msg_id:
