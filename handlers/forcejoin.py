@@ -6,20 +6,49 @@ from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineK
 from config import (
     HTML, ADMIN_ID, settings_col, fj_sessions, app,
 )
-from helpers import log_event, admin_filter
+from helpers import log_event, admin_filter, _clone_config_ctx, BOT_TOKEN
 
 
-async def _fj_doc() -> dict:
-    doc = await settings_col.find_one({"key": "force_join"})
-    return doc or {"key": "force_join", "enabled": False, "channels": []}
+# ══════════════════════════════════════════════════════════════════════════════
+# Internal helpers — per-bot namespacing
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _fj_key(client=None) -> str:
+    """Return the settings_col key for this bot's force_join config.
+    Main bot → 'force_join'
+    Clone bot → 'force_join_<token>'
+    """
+    if client is not None:
+        cfg = getattr(client, "_clone_config", None) or _clone_config_ctx.get()
+        if cfg:
+            tok = cfg.get("token", "")
+            if tok:
+                return f"force_join_{tok}"
+    return "force_join"
 
 
-async def get_force_join() -> dict:
-    return await _fj_doc()
+async def _fj_doc(client=None) -> dict:
+    key = _fj_key(client)
+    doc = await settings_col.find_one({"key": key})
+    return doc or {"key": key, "enabled": False, "channels": []}
 
 
-async def get_fj_channels() -> list:
-    doc = await _fj_doc()
+async def _fj_save(data: dict, client=None):
+    """Upsert the force_join doc for this bot."""
+    key = _fj_key(client)
+    await settings_col.update_one(
+        {"key": key},
+        {"$set": {**data, "key": key}},
+        upsert=True,
+    )
+
+
+async def get_force_join(client=None) -> dict:
+    return await _fj_doc(client)
+
+
+async def get_fj_channels(client=None) -> list:
+    doc = await _fj_doc(client)
     return doc.get("channels", [])
 
 
@@ -44,15 +73,19 @@ async def get_not_joined(client: Client, user_id: int, channels: list) -> list:
     return not_joined
 
 
-async def _check_force_join(user_id: int) -> list:
-    from config import app as _app
-    doc = await _fj_doc()
+async def _check_force_join(user_id: int, client=None) -> list:
+    """Return list of channels the user hasn't joined.
+    Uses the bot's own client so clone bots check correctly.
+    """
+    from config import app as _main_app
+    check_client = client if client is not None else _main_app
+    doc = await _fj_doc(client)
     if not doc.get("enabled"):
         return []
     channels = doc.get("channels", [])
     if not channels:
         return []
-    return await get_not_joined(_app, user_id, channels)
+    return await get_not_joined(check_client, user_id, channels)
 
 
 def _fj_extract_chat_id(link: str) -> str:
@@ -152,10 +185,23 @@ def _fj_status_text(doc: dict) -> str:
     return "\n".join(lines)
 
 
+def _fj_session_key(client, uid: int) -> int:
+    """Session key: user id (unique per admin).
+    We keep uid as the key — different bots have different admins,
+    and ADMIN_ID is always the super admin so no collision risk.
+    """
+    return uid
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# /forcejoin command
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.on_message(filters.command("forcejoin") & admin_filter & filters.private)
 async def forcejoin_cmd(client: Client, message: Message):
     args = message.command[1:]
-    doc  = await _fj_doc()
+    doc  = await _fj_doc(client)
+    uid  = message.from_user.id
 
     if not args or args[0].lower() == "list":
         await message.reply_text(_fj_status_text(doc))
@@ -172,9 +218,7 @@ async def forcejoin_cmd(client: Client, message: Message):
                 "/forcejoin add"
             )
             return
-        await settings_col.update_one(
-            {"key": "force_join"}, {"$set": {"enabled": True}}, upsert=True
-        )
+        await _fj_save({"enabled": True, "channels": channels}, client)
         await message.reply_text(
             "✅ FORCE JOIN ENABLED\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -187,9 +231,8 @@ async def forcejoin_cmd(client: Client, message: Message):
         return
 
     if sub == "off":
-        await settings_col.update_one(
-            {"key": "force_join"}, {"$set": {"enabled": False}}, upsert=True
-        )
+        channels = doc.get("channels", [])
+        await _fj_save({"enabled": False, "channels": channels}, client)
         await message.reply_text(
             "❌ FORCE JOIN DISABLED\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -202,12 +245,14 @@ async def forcejoin_cmd(client: Client, message: Message):
 
     if sub == "remove":
         channels = doc.get("channels", [])
+        if not channels:
+            await message.reply_text("❌ No channels configured. Use /forcejoin add first.")
+            return
         if len(args) < 2 or not args[1].isdigit():
+            ch_list = "\n".join(f"  {i}. {c['name']}" for i, c in enumerate(channels, 1))
             await message.reply_text(
                 f"Usage: /forcejoin remove <number>\n\n"
-                f"Current channels:\n" +
-                "\n".join(f"  {i}. {c['name']}" for i, c in enumerate(channels, 1))
-                or "  (none)"
+                f"Current channels:\n{ch_list}"
             )
             return
         idx = int(args[1]) - 1
@@ -215,9 +260,7 @@ async def forcejoin_cmd(client: Client, message: Message):
             await message.reply_text(f"❌ Invalid number. Choose 1–{len(channels)}.")
             return
         removed = channels.pop(idx)
-        await settings_col.update_one(
-            {"key": "force_join"}, {"$set": {"channels": channels}}, upsert=True
-        )
+        await _fj_save({"channels": channels, "enabled": doc.get("enabled", False)}, client)
         await message.reply_text(
             "🗑️ CHANNEL REMOVED\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -230,6 +273,7 @@ async def forcejoin_cmd(client: Client, message: Message):
         return
 
     if sub in ("add", "link"):
+        fj_sessions.pop(uid, None)
         await _fj_show_add_card(message.reply_text, doc)
         return
 
@@ -240,9 +284,7 @@ async def forcejoin_cmd(client: Client, message: Message):
             await message.reply_text("✅ No broken entries found. All channels have valid IDs.")
             return
         fixed = [ch for ch in channels if not str(ch.get("chat_id", "")).startswith("http")]
-        await settings_col.update_one(
-            {"key": "force_join"}, {"$set": {"channels": fixed}}, upsert=True
-        )
+        await _fj_save({"channels": fixed, "enabled": doc.get("enabled", False)}, client)
         names = "\n".join(f"  🗑️ {ch['name']}" for ch in broken)
         await message.reply_text(
             "🧹 <b>CLEANED UP BROKEN ENTRIES</b>\n"
@@ -277,9 +319,7 @@ async def forcejoin_cmd(client: Client, message: Message):
             else:
                 results.append(f"ℹ️ {ch['name']}: already numeric ({cid})")
         if changed:
-            await settings_col.update_one(
-                {"key": "force_join"}, {"$set": {"channels": channels}}, upsert=True
-            )
+            await _fj_save({"channels": channels, "enabled": doc.get("enabled", False)}, client)
         result_text = "\n".join(results)
         await msg.edit_text(
             "🔧 FORCE JOIN FIX RESULT\n"
@@ -293,16 +333,25 @@ async def forcejoin_cmd(client: Client, message: Message):
     await message.reply_text(_fj_status_text(doc))
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# /forcejoinadd — shortcut for wizard
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.on_message(filters.command("forcejoinadd") & admin_filter & filters.private)
 async def forcejoinadd_cmd(client: Client, message: Message):
-    fj_sessions.pop(ADMIN_ID, None)
-    doc = await _fj_doc()
+    uid = message.from_user.id
+    fj_sessions.pop(uid, None)
+    doc = await _fj_doc(client)
     await _fj_show_add_card(message.reply_text, doc)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# /forcebuttondel — button-based removal UI
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.on_message(filters.command("forcebuttondel") & admin_filter & filters.private)
 async def forcebuttondel_cmd(client: Client, message: Message):
-    doc      = await _fj_doc()
+    doc      = await _fj_doc(client)
     channels = doc.get("channels", [])
     if not channels:
         return await message.reply_text(
@@ -324,14 +373,20 @@ async def forcebuttondel_cmd(client: Client, message: Message):
     )
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Callbacks — fj_set_button (start wizard)
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.on_callback_query(filters.regex("^fj_set_button$") & admin_filter)
 async def fj_set_button_cb(client: Client, cq: CallbackQuery):
-    fj_sessions[cq.from_user.id] = {
+    uid = cq.from_user.id
+    fj_sessions[uid] = {
         "state":               "fj_wait_btn",
         "wizard_msg_id":       cq.message.id,
         "pending_channels":    [],
         "unresolved_channels": [],
         "fwd_index":           0,
+        "fj_key":              _fj_key(client),   # store which bot this belongs to
     }
     await cq.edit_message_text(
         "📢 <b>Step 1 — Send Channel Info</b>\n"
@@ -353,14 +408,19 @@ async def fj_set_button_cb(client: Client, cq: CallbackQuery):
     await cq.answer()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Callbacks — fj_confirm (save channels)
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.on_callback_query(filters.regex("^fj_confirm$") & admin_filter)
 async def fj_confirm_cb(client: Client, cq: CallbackQuery):
-    fj = fj_sessions.pop(ADMIN_ID, None)
+    uid = cq.from_user.id                          # ← FIXED: was ADMIN_ID
+    fj  = fj_sessions.pop(uid, None)
     if not fj or fj.get("state") != "fj_add_confirm":
         return await cq.answer("No active session.", show_alert=True)
 
     pending  = fj.get("pending_channels", [])
-    doc      = await _fj_doc()
+    doc      = await _fj_doc(client)
     existing = doc.get("channels", [])
 
     new_names = {ch["name"] for ch in pending}
@@ -378,11 +438,7 @@ async def fj_confirm_cb(client: Client, cq: CallbackQuery):
     ]
     channels = kept + pending
 
-    await settings_col.update_one(
-        {"key": "force_join"},
-        {"$set": {"channels": channels}},
-        upsert=True,
-    )
+    await _fj_save({"channels": channels, "enabled": doc.get("enabled", False)}, client)
 
     removed_count = len(existing) - len(kept)
     if removed_count:
@@ -402,8 +458,7 @@ async def fj_confirm_cb(client: Client, cq: CallbackQuery):
         try:
             if isinstance(cid, str) and cid.startswith("http"):
                 raise ValueError("invite link — provide numeric ID instead")
-            from config import app as _app
-            await _app.get_chat(cid)
+            await client.get_chat(cid)           # ← use this bot's client
             status_lines.append(f"  ✅ {ch['name']}")
         except (ChannelPrivate, PeerIdInvalid, ChannelInvalid,
                 UsernameInvalid, UsernameNotOccupied, ValueError) as e:
@@ -411,8 +466,8 @@ async def fj_confirm_cb(client: Client, cq: CallbackQuery):
         except Exception as e:
             status_lines.append(f"  ⚠️ {ch['name']} — {e}")
 
-    has_warning  = any("⚠️" in l for l in status_lines)
-    status_text  = "\n".join(status_lines)
+    has_warning   = any("⚠️" in l for l in status_lines)
+    status_text   = "\n".join(status_lines)
     warning_block = (
         "\n\n⚠️ <b>ACTION REQUIRED</b>\n"
         "Bot cannot verify membership for ⚠️ channels above.\n"
@@ -438,9 +493,14 @@ async def fj_confirm_cb(client: Client, cq: CallbackQuery):
     print(f"[FORCEJOIN] Added {len(pending)} channels: {[c['name'] for c in pending]}")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Callbacks — fj_cancel
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.on_callback_query(filters.regex("^fj_cancel$") & admin_filter)
 async def fj_cancel_cb(client: Client, cq: CallbackQuery):
-    fj_sessions.pop(ADMIN_ID, None)
+    uid = cq.from_user.id                          # ← FIXED: was ADMIN_ID
+    fj_sessions.pop(uid, None)
     await cq.edit_message_text(
         "🚫 Cancelled.\n"
         "No channel was added.\n\n"
@@ -448,6 +508,10 @@ async def fj_cancel_cb(client: Client, cq: CallbackQuery):
     )
     await cq.answer("Cancelled.")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Callbacks — fj_del_<n> / fj_del_done (button removal)
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.on_callback_query(filters.regex(r"^fj_del_(\d+|done)$") & admin_filter)
 async def fj_del_cb(client: Client, cq: CallbackQuery):
@@ -458,7 +522,7 @@ async def fj_del_cb(client: Client, cq: CallbackQuery):
         return await cq.answer()
 
     idx      = int(data.split("_")[-1])
-    doc      = await _fj_doc()
+    doc      = await _fj_doc(client)
     channels = doc.get("channels", [])
 
     if idx >= len(channels):
@@ -466,11 +530,7 @@ async def fj_del_cb(client: Client, cq: CallbackQuery):
         return
 
     removed = channels.pop(idx)
-    await settings_col.update_one(
-        {"key": "force_join"},
-        {"$set": {"channels": channels}},
-        upsert=True,
-    )
+    await _fj_save({"channels": channels, "enabled": doc.get("enabled", False)}, client)
 
     if not channels:
         await cq.edit_message_text(
@@ -498,6 +558,10 @@ async def fj_del_cb(client: Client, cq: CallbackQuery):
     print(f"[FORCEJOIN] Removed channel: {removed}")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Callbacks — fj_no_link / fj_check (user-facing)
+# ══════════════════════════════════════════════════════════════════════════════
+
 @app.on_callback_query(filters.regex("^fj_no_link$"))
 async def fj_no_link_cb(client: Client, cq: CallbackQuery):
     await cq.answer(
@@ -510,7 +574,7 @@ async def fj_no_link_cb(client: Client, cq: CallbackQuery):
 @app.on_callback_query(filters.regex("^fj_check$"))
 async def fj_check_cb(client: Client, cq: CallbackQuery):
     user_id    = cq.from_user.id
-    not_joined = await _check_force_join(user_id)
+    not_joined = await _check_force_join(user_id, client)   # ← pass client
 
     if not_joined:
         try:
