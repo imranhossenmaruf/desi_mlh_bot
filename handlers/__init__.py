@@ -1,0 +1,16 @@
+from handlers import (
+    start,
+    user,
+    admin,
+    video,
+    premium,
+    broadcast,
+    forcejoin,
+    moderation,
+    antiflood,
+    filters,
+    nightmode,
+    shadowban,
+    welcome,
+    misc,
+)
