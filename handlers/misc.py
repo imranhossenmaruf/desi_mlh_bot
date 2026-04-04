@@ -378,6 +378,31 @@ async def admin_message_handler(client: Client, message: Message):
             if message.caption:
                 session["text"]     = message.caption
                 session["entities"] = message.caption_entities or []
+            # Extract file_id and media_kind for reliable delivery
+            if message.photo:
+                session["file_id"]    = message.photo.file_id
+                session["media_kind"] = "photo"
+            elif message.video:
+                session["file_id"]    = message.video.file_id
+                session["media_kind"] = "video"
+            elif message.animation:
+                session["file_id"]    = message.animation.file_id
+                session["media_kind"] = "animation"
+            elif message.document:
+                session["file_id"]    = message.document.file_id
+                session["media_kind"] = "document"
+            elif message.audio:
+                session["file_id"]    = message.audio.file_id
+                session["media_kind"] = "audio"
+            elif message.voice:
+                session["file_id"]    = message.voice.file_id
+                session["media_kind"] = "voice"
+            elif message.sticker:
+                session["file_id"]    = message.sticker.file_id
+                session["media_kind"] = "sticker"
+            elif message.video_note:
+                session["file_id"]    = message.video_note.file_id
+                session["media_kind"] = "video_note"
             session["state"] = STATE_CUSTOMIZE
         else:
             session["msg_type"] = "text"
@@ -428,6 +453,8 @@ async def admin_message_handler(client: Client, message: Message):
             "entities_raw":  [e.__class__.__name__ for e in (session.get("entities") or [])],
             "media_chat_id": session.get("media_chat_id"),
             "media_msg_id":  session.get("media_msg_id"),
+            "file_id":       session.get("file_id"),
+            "media_kind":    session.get("media_kind"),
             "extra_buttons": session.get("extra_buttons"),
         })
         broadcast_sessions.pop(ADMIN_ID, None)
@@ -484,6 +511,8 @@ async def _run_scheduled(client: Client):
                 "entities":      [],
                 "media_chat_id": doc.get("media_chat_id"),
                 "media_msg_id":  doc.get("media_msg_id"),
+                "file_id":       doc.get("file_id"),
+                "media_kind":    doc.get("media_kind"),
                 "extra_buttons": doc.get("extra_buttons"),
                 "chat_id":       admin_chat,
             }

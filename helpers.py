@@ -193,6 +193,42 @@ def kb_confirm():
     ])
 
 
+async def _send_media(client: Client, chat_id: int, session: dict,
+                      caption=None, caption_entities=None, reply_markup=None):
+    """Send media using file_id (preferred) or fallback to copy_message."""
+    file_id    = session.get("file_id")
+    media_kind = session.get("media_kind", "document")
+    kw = dict(caption=caption, caption_entities=caption_entities, reply_markup=reply_markup)
+
+    if file_id:
+        if media_kind == "photo":
+            return await client.send_photo(chat_id, photo=file_id, **kw)
+        elif media_kind == "video":
+            return await client.send_video(chat_id, video=file_id, **kw)
+        elif media_kind == "animation":
+            return await client.send_animation(chat_id, animation=file_id, **kw)
+        elif media_kind == "document":
+            return await client.send_document(chat_id, document=file_id, **kw)
+        elif media_kind == "audio":
+            return await client.send_audio(chat_id, audio=file_id, **kw)
+        elif media_kind == "voice":
+            return await client.send_voice(chat_id, voice=file_id, **kw)
+        elif media_kind == "sticker":
+            return await client.send_sticker(chat_id, sticker=file_id, reply_markup=reply_markup)
+        elif media_kind == "video_note":
+            return await client.send_video_note(chat_id, video_note=file_id, reply_markup=reply_markup)
+
+    # Fallback: copy_message
+    return await client.copy_message(
+        chat_id=chat_id,
+        from_chat_id=session["media_chat_id"],
+        message_id=session["media_msg_id"],
+        caption=caption,
+        caption_entities=caption_entities,
+        reply_markup=reply_markup,
+    )
+
+
 async def refresh_preview(client: Client, session: dict):
     chat_id  = session["chat_id"]
     kb       = kb_customize(session.get("extra_buttons"), mode=session.get("mode", "broadcast"))
@@ -213,16 +249,19 @@ async def refresh_preview(client: Client, session: dict):
                 reply_markup=kb,
             )
         elif msg_type == "media":
-            sent = await client.copy_message(
+            sent = await _send_media(client, chat_id, session,
+                                     caption=text, caption_entities=entities, reply_markup=kb)
+    except Exception as e:
+        print(f"[refresh_preview] error: {e}")
+        try:
+            await client.send_message(
                 chat_id=chat_id,
-                from_chat_id=session["media_chat_id"],
-                message_id=session["media_msg_id"],
-                caption=text,
-                caption_entities=entities,
+                text=f"⚠️ Preview failed: <code>{e}</code>\n\nTry sending the media again.",
+                parse_mode="html",
                 reply_markup=kb,
             )
-    except Exception as e:
-        print(f"refresh_preview error: {e}")
+        except Exception:
+            pass
 
     if sent:
         session["preview_msg_id"] = sent.id
@@ -249,14 +288,8 @@ async def send_to_user(client: Client, uid: int, session: dict, reply_markup=Non
             reply_markup=reply_markup,
         )
     elif msg_type == "media":
-        return await client.copy_message(
-            chat_id=uid,
-            from_chat_id=session["media_chat_id"],
-            message_id=session["media_msg_id"],
-            caption=text,
-            caption_entities=entities,
-            reply_markup=reply_markup,
-        )
+        return await _send_media(client, uid, session,
+                                 caption=text, caption_entities=entities, reply_markup=reply_markup)
     return None
 
 
