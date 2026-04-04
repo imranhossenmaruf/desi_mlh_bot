@@ -210,12 +210,12 @@ async def start_handler(client: Client, message: Message):
             InlineKeyboardButton("💎 Buy Premium ✨", callback_data="open_buypremium"),
             InlineKeyboardButton("📤 Share Bot",
                                  url=(
-                                     "https://t.me/share/url"
-                                     "?text=%E2%96%91%E2%96%92%E2%96%93%E2%96%88%20%F0%9F%94%A5%20DIAMOND%20BOT%20ACCESS%20%F0%9F%94%A5%20%E2%96%88%E2%96%93%E2%96%92%E2%96%91%0A"
-                                     "%F0%9F%8E%AC%20Premium%20commands%20live%20now%0A"
-                                     "%F0%9F%92%8C%20Click%20%26%20Enter%0A"
-                                     "%E2%9C%A8%20For%20true%20enthusiasts%20only%0A%0A"
-                                     f"https%3A%2F%2Ft.me%2F{bot_username}"
+                                     f"https://t.me/share/url"
+                                     f"?url=https://t.me/{bot_username}%3Fstart%3Dvideo"
+                                     f"&text=%E2%96%91%E2%96%92%E2%96%93%E2%96%88%20%F0%9F%94%A5%20DIAMOND%20BOT%20ACCESS%20%F0%9F%94%A5%20%E2%96%88%E2%96%93%E2%96%92%E2%96%91%0A"
+                                     f"%F0%9F%8E%AC%20Premium%20commands%20live%20now%0A"
+                                     f"%F0%9F%92%8C%20Click%20%26%20Enter%0A"
+                                     f"%E2%9C%A8%20For%20true%20enthusiasts%20only"
                                  )),
         ],
     ])
