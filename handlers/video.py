@@ -7,7 +7,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import (
     HTML, ADMIN_ID, DAILY_VIDEO_LIMIT, VIDEO_CHANNEL, VIDEO_REPEAT_DAYS,
-    users_col, videos_col, vid_hist_col,
+    users_col, videos_col, vid_hist_col, premium_col,
     app,
 )
 from helpers import get_bot_username, log_event, bot_api
@@ -30,8 +30,18 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
     vid_date  = (doc or {}).get("video_date", "")
     vid_count = (doc or {}).get("video_count", 0) if vid_date == today else 0
 
-    raw_limit      = (doc or {}).get("video_limit")
-    is_unlimited   = (raw_limit == -1)
+    from datetime import timezone
+    prem_doc = await premium_col.find_one({"user_id": user_id})
+    if prem_doc:
+        expires_at = prem_doc.get("expires_at")
+        if expires_at and expires_at.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
+            raw_limit = prem_doc.get("video_limit", DAILY_VIDEO_LIMIT)
+        else:
+            await premium_col.delete_one({"user_id": user_id})
+            raw_limit = (doc or {}).get("video_limit")
+    else:
+        raw_limit = (doc or {}).get("video_limit")
+    is_unlimited   = (raw_limit == -1 or (isinstance(raw_limit, int) and raw_limit >= 999))
     effective_limit = (
         None
         if is_unlimited
@@ -91,12 +101,6 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
         usage_line = f"📹 Today: {used}/{effective_limit}  |  Remaining: {left}"
 
     try:
-        chan_msg = await client.get_messages(VIDEO_CHANNEL, msg_id)
-        if not chan_msg or not chan_msg.video:
-            await videos_col.delete_one({"message_id": msg_id})
-            print(f"[VIDEO] msg={msg_id} missing in channel, removed from DB")
-            return "❌ Could not fetch the video. Please try again."
-
         caption = (
             "🎬 DESI MLH Video\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -105,14 +109,21 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             "🤖 DESI MLH SYSTEM"
         )
-        resp = await bot_api("sendVideo", {
-            "chat_id":             user_id,
-            "video":               chan_msg.video.file_id,
-            "caption":             caption,
-            "has_spoiler":         True,
-            "supports_streaming":  True,
-            "protect_content":     True,
+        resp = await bot_api("copyMessage", {
+            "chat_id":         user_id,
+            "from_chat_id":    VIDEO_CHANNEL,
+            "message_id":      msg_id,
+            "caption":         caption,
+            "has_spoiler":     True,
+            "protect_content": True,
         })
+        if not resp.get("ok"):
+            err_desc = resp.get("description", "")
+            print(f"[VIDEO] copyMessage failed: {err_desc}")
+            if "not found" in err_desc.lower() or "invalid" in err_desc.lower():
+                await videos_col.delete_one({"message_id": msg_id})
+                print(f"[VIDEO] msg={msg_id} not found, removed from DB")
+            return "❌ Could not send the video. Please try again."
         sent_msg_id = resp.get("result", {}).get("message_id")
         if sent_msg_id:
             async def _del_video(mid=sent_msg_id, uid=user_id):
@@ -124,7 +135,7 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
             asyncio.create_task(_del_video())
     except Exception as e:
         print(f"[VIDEO] send_video error: {e}")
-        return "❌ Could not fetch the video. Please try again."
+        return "❌ Could not send the video. Please try again."
 
     now = datetime.utcnow()
     await users_col.update_one(
