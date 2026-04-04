@@ -12,7 +12,12 @@ from config import (
     settings_col, inbox_col, conversations_col,
     users_col, premium_col, app,
 )
-from helpers import bot_api, _auto_del, get_rank, get_status, admin_filter, get_cfg
+from helpers import bot_api, _auto_del, get_rank, get_status, admin_filter, get_cfg, BOT_TOKEN
+
+
+def _tok(client) -> str:
+    """Return the correct bot token for API calls (clone or main)."""
+    return getattr(client, "_bot_token", None) or BOT_TOKEN
 
 
 # ─── Internal helpers ──────────────────────────────────────────────────────────
@@ -165,7 +170,7 @@ async def set_inbox_group_cmd(client: Client, message: Message):
             "chat_id":    group_id,
             "text":       "✅ <b>Inbox Group Connected!</b>\n━━━━━━━━━━━━━━━━━━━━━━\nUser messages will be forwarded here.\nReply to any forwarded message to respond.\n━━━━━━━━━━━━━━━━━━━━━━\n🤖 DESI MLH SYSTEM",
             "parse_mode": "HTML",
-        })
+        }, token=_tok(client))
         test_ok  = res.get("ok", False)
         test_err = res.get("description", "")
     except Exception as e:
@@ -210,7 +215,7 @@ async def user_msg_to_inbox(client: Client, message: Message):
             "chat_id":      inbox_id,
             "from_chat_id": user.id,
             "message_id":   message.id,
-        })
+        }, token=_tok(client))
         fwd_msg_id = (fwd.get("result") or {}).get("message_id")
 
         if fwd_msg_id:
@@ -271,7 +276,8 @@ async def inbox_group_reply(client: Client, message: Message):
         target_uname = mapping.get("username", "")
         content, msg_type = _msg_content_and_type(message)
 
-        # ── Send to user ─────────────────────────────────────────────────────
+        # ── Send to user (use this client's token — works for clone bots too) ─
+        tok = _tok(client)
         ok  = False
         err = ""
         if message.text:
@@ -279,7 +285,7 @@ async def inbox_group_reply(client: Client, message: Message):
                 "chat_id": target_uid,
                 "text":    message.text,
                 "parse_mode": "HTML",
-            })
+            }, token=tok)
             ok = r.get("ok", False)
             err = r.get("description", "")
         elif message.photo:
@@ -288,7 +294,7 @@ async def inbox_group_reply(client: Client, message: Message):
                 "photo":   message.photo.file_id,
                 "caption": message.caption or "",
                 "parse_mode": "HTML",
-            })
+            }, token=tok)
             ok = r.get("ok", False)
             err = r.get("description", "")
         elif message.video:
@@ -297,7 +303,7 @@ async def inbox_group_reply(client: Client, message: Message):
                 "video":   message.video.file_id,
                 "caption": message.caption or "",
                 "parse_mode": "HTML",
-            })
+            }, token=tok)
             ok = r.get("ok", False)
             err = r.get("description", "")
         elif message.document:
@@ -306,14 +312,14 @@ async def inbox_group_reply(client: Client, message: Message):
                 "document": message.document.file_id,
                 "caption":  message.caption or "",
                 "parse_mode": "HTML",
-            })
+            }, token=tok)
             ok = r.get("ok", False)
             err = r.get("description", "")
         elif message.voice:
             r = await bot_api("sendVoice", {
                 "chat_id": target_uid,
                 "voice":   message.voice.file_id,
-            })
+            }, token=tok)
             ok = r.get("ok", False)
             err = r.get("description", "")
         elif message.audio:
@@ -322,28 +328,28 @@ async def inbox_group_reply(client: Client, message: Message):
                 "audio":   message.audio.file_id,
                 "caption": message.caption or "",
                 "parse_mode": "HTML",
-            })
+            }, token=tok)
             ok = r.get("ok", False)
             err = r.get("description", "")
         elif message.sticker:
             r = await bot_api("sendSticker", {
                 "chat_id": target_uid,
                 "sticker": message.sticker.file_id,
-            })
+            }, token=tok)
             ok = r.get("ok", False)
             err = r.get("description", "")
         elif message.video_note:
             r = await bot_api("sendVideoNote", {
                 "chat_id":    target_uid,
                 "video_note": message.video_note.file_id,
-            })
+            }, token=tok)
             ok = r.get("ok", False)
             err = r.get("description", "")
         else:
             r = await bot_api("sendMessage", {
                 "chat_id": target_uid,
                 "text":    "📎 Admin sent a message (unsupported type in inbox).",
-            })
+            }, token=tok)
             ok = r.get("ok", False)
             err = r.get("description", "")
 
@@ -354,7 +360,7 @@ async def inbox_group_reply(client: Client, message: Message):
                     "chat_id":    inbox_id,
                     "message_id": message.id,
                     "reaction":   [{"type": "emoji", "emoji": "👍"}],
-                })
+                }, token=tok)
             except Exception:
                 pass
             print(f"[INBOX_REPLY] ✅ Delivered to user={target_uid}")
