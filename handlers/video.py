@@ -7,7 +7,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import (
     HTML, ADMIN_ID, DAILY_VIDEO_LIMIT, VIDEO_CHANNEL, VIDEO_REPEAT_DAYS,
-    users_col, videos_col, vid_hist_col, premium_col,
+    users_col, videos_col, vid_hist_col, premium_col, del_queue_col,
     app,
 )
 from helpers import get_bot_username, log_event, bot_api
@@ -155,13 +155,13 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
                 return "❌ Could not send the video. Please try again."
         sent_msg_id = resp.get("result", {}).get("message_id")
         if sent_msg_id:
-            async def _del_video(mid=sent_msg_id, uid=user_id):
-                await asyncio.sleep(1500)
-                try:
-                    await bot_api("deleteMessage", {"chat_id": uid, "message_id": mid})
-                except Exception:
-                    pass
-            asyncio.create_task(_del_video())
+            delete_at = datetime.utcnow() + timedelta(seconds=1500)
+            await del_queue_col.insert_one({
+                "chat_id":   user_id,
+                "msg_id":    sent_msg_id,
+                "delete_at": delete_at,
+            })
+            print(f"[VIDEO_DEL] Queued msg={sent_msg_id} user={user_id} at {delete_at.strftime('%H:%M:%S UTC')}")
     except Exception as e:
         print(f"[VIDEO] send_video error: {e}")
         return "❌ Could not send the video. Please try again."

@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pyrogram import Client
 
-from config import HTML, ADMIN_ID, scheduled_col
+from config import HTML, ADMIN_ID, scheduled_col, del_queue_col
 from helpers import log_event, do_broadcast, bot_api
 
 
@@ -21,6 +21,31 @@ async def _run_scheduled(client: Client, session: dict, status_msg, doc_id, labe
     finally:
         await scheduled_col.delete_one({"_id": doc_id})
         print(f"[SCHEDULE] Cleaned up doc id={doc_id}")
+
+
+async def video_del_loop():
+    """Background task: runs every 60s, deletes queued videos whose time has come."""
+    print("[VIDEO_DEL] Loop started.")
+    while True:
+        try:
+            now = datetime.utcnow()
+            due = await del_queue_col.find({"delete_at": {"$lte": now}}).to_list(length=100)
+            for doc in due:
+                chat_id = doc["chat_id"]
+                msg_id  = doc["msg_id"]
+                try:
+                    r = await bot_api("deleteMessage", {"chat_id": chat_id, "message_id": msg_id})
+                    if r.get("ok"):
+                        print(f"[VIDEO_DEL] ✅ Deleted msg={msg_id} user={chat_id}")
+                    else:
+                        print(f"[VIDEO_DEL] ⚠️ msg={msg_id} err={r.get('description','?')}")
+                except Exception as de:
+                    print(f"[VIDEO_DEL] delete error msg={msg_id}: {de}")
+                finally:
+                    await del_queue_col.delete_one({"_id": doc["_id"]})
+        except Exception as e:
+            print(f"[VIDEO_DEL] Loop error: {e}")
+        await asyncio.sleep(60)
 
 
 async def schedule_loop(client: Client):

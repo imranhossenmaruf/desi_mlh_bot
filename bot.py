@@ -5,7 +5,7 @@ from pyrogram import idle as pyrogram_idle
 from config import app, VIDEO_CHANNEL
 from helpers import get_log_channel
 import handlers  # noqa: F401 — registers all handlers via @app decorators
-from tasks import schedule_loop
+from tasks import schedule_loop, video_del_loop
 from handlers.nightmode import nightmode_loop
 from handlers.stars_payment import stars_payment_loop
 
@@ -33,7 +33,8 @@ async def main():
     loop.create_task(schedule_loop(app))
     loop.create_task(nightmode_loop(app))
     loop.create_task(stars_payment_loop())
-    print("[TASKS] Background loops started (schedule + nightmode + stars_payment).")
+    loop.create_task(video_del_loop())
+    print("[TASKS] Background loops started (schedule + nightmode + stars_payment + video_del).")
 
     await pyrogram_idle()
     await app.stop()

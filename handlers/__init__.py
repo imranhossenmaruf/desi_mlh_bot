@@ -15,4 +15,5 @@ from handlers import (
     misc,
     inbox,
     groups,
+    admin_mgmt,
 )
