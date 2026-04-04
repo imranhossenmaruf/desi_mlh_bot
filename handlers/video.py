@@ -10,7 +10,7 @@ from config import (
     users_col, videos_col, vid_hist_col, premium_col, del_queue_col,
     app,
 )
-from helpers import get_bot_username, log_event, bot_api, _bot_token_ctx, BOT_TOKEN, admin_filter
+from helpers import get_bot_username, log_event, bot_api, _bot_token_ctx, BOT_TOKEN, get_cfg, admin_filter
 
 
 async def _send_video_to_user(client: Client, user_id: int) -> str:
@@ -126,7 +126,7 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
         else:
             resp = await bot_api("copyMessage", {
                 "chat_id":         user_id,
-                "from_chat_id":    VIDEO_CHANNEL,
+                "from_chat_id":    get_cfg("video_channel", VIDEO_CHANNEL),
                 "message_id":      msg_id,
                 "caption":         caption,
                 "has_spoiler":     True,
@@ -141,7 +141,7 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
                 await videos_col.update_one({"message_id": msg_id}, {"$unset": {"file_id": ""}})
                 resp = await bot_api("copyMessage", {
                     "chat_id":         user_id,
-                    "from_chat_id":    VIDEO_CHANNEL,
+                    "from_chat_id":    get_cfg("video_channel", VIDEO_CHANNEL),
                     "message_id":      msg_id,
                     "caption":         caption,
                     "has_spoiler":     True,
@@ -304,7 +304,7 @@ async def video_handler_group(client: Client, message: Message):
 
 @app.on_message(filters.channel)
 async def channel_post_handler(client: Client, message: Message):
-    if message.chat.id != VIDEO_CHANNEL:
+    if message.chat.id != get_cfg("video_channel", VIDEO_CHANNEL):
         return
     if not message.video:
         return
@@ -312,7 +312,7 @@ async def channel_post_handler(client: Client, message: Message):
     exists = await videos_col.find_one({"message_id": message.id})
     if not exists:
         await videos_col.insert_one({
-            "channel_id": VIDEO_CHANNEL,
+            "channel_id": get_cfg("video_channel", VIDEO_CHANNEL),
             "message_id": message.id,
             "file_id":    file_id,
             "added_at":   datetime.utcnow(),
@@ -336,7 +336,7 @@ async def channel_post_handler(client: Client, message: Message):
             f"🎬 <b>New Video Posted in Channel</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"🎞 Video ID  : <code>{message.id}</code>\n"
-            f"📺 Channel   : <code>{VIDEO_CHANNEL}</code>\n"
+            f"📺 Channel   : <code>{get_cfg('video_channel', VIDEO_CHANNEL)}</code>\n"
             f"📦 Total DB  : <b>{total} video(s)</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"🤖 DESI MLH SYSTEM"
@@ -360,13 +360,13 @@ async def channel_post_handler(client: Client, message: Message):
 async def admin_forward_video(client: Client, message: Message):
     fwd_chat = getattr(message, "forward_from_chat", None)
     fwd_id   = getattr(message, "forward_from_message_id", None)
-    if not fwd_chat or fwd_chat.id != VIDEO_CHANNEL or not fwd_id:
+    if not fwd_chat or fwd_chat.id != get_cfg("video_channel", VIDEO_CHANNEL) or not fwd_id:
         return
     file_id = message.video.file_id if message.video else None
     exists = await videos_col.find_one({"message_id": fwd_id})
     if not exists:
         await videos_col.insert_one({
-            "channel_id": VIDEO_CHANNEL,
+            "channel_id": get_cfg("video_channel", VIDEO_CHANNEL),
             "message_id": fwd_id,
             "file_id":    file_id,
             "added_at":   datetime.utcnow(),
@@ -384,7 +384,7 @@ async def admin_forward_video(client: Client, message: Message):
         f"📤 <b>Video Saved by Admin</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎞 Video ID  : <code>{fwd_id}</code>\n"
-        f"📺 Channel   : <code>{VIDEO_CHANNEL}</code>\n"
+        f"📺 Channel   : <code>{get_cfg('video_channel', VIDEO_CHANNEL)}</code>\n"
         f"🗃 Status    : {status_label}\n"
         f"📦 Total DB  : <b>{total} video(s)</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -414,7 +414,7 @@ async def syncvideos_cmd(client: Client, message: Message):
         try:
             fwd = await bot_api("forwardMessage", {
                 "chat_id":      ADMIN_ID,
-                "from_chat_id": VIDEO_CHANNEL,
+                "from_chat_id": get_cfg("video_channel", VIDEO_CHANNEL),
                 "message_id":   msg_id,
             })
             if fwd.get("ok"):

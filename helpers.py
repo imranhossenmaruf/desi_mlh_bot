@@ -15,31 +15,64 @@ from config import (
     admins_col,
 )
 
-# ── Per-update context: holds the active bot token (main or clone) ────────────
+# ── Per-update context: active bot token + clone config ───────────────────────
 _bot_token_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
     "bot_token", default=BOT_TOKEN
+)
+_clone_config_ctx: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "clone_config", default=None
 )
 
 BOT_USERNAME_CACHE: str = ""
 
 
-# ── Dynamic admin check (super admin + DB sub-admins) ─────────────────────────
+def get_cfg(key: str, fallback=None):
+    """Read from active clone config first; fall back to global value."""
+    cfg = _clone_config_ctx.get()
+    if cfg and cfg.get(key) is not None:
+        return cfg[key]
+    return fallback
+
+
+# ── Dynamic admin checks ───────────────────────────────────────────────────────
 
 async def is_any_admin(user_id: int) -> bool:
+    """Main-bot admin check: super admin OR DB sub-admin."""
     if user_id == ADMIN_ID:
         return True
     doc = await admins_col.find_one({"user_id": user_id, "active": True})
     return doc is not None
 
 
+def is_clone_context() -> bool:
+    return _clone_config_ctx.get() is not None
+
+
 async def _admin_filter_func(flt, client, update) -> bool:
     user = getattr(update, "from_user", None)
     if not user:
         return False
-    return await is_any_admin(user.id)
+    uid = user.id
+    cfg = _clone_config_ctx.get()
+    if cfg:
+        # Clone context: main super admin OR this clone's admin
+        return uid == ADMIN_ID or uid == cfg.get("admin_id")
+    return await is_any_admin(uid)
 
 
-admin_filter = _pf.create(_admin_filter_func, name="AdminFilter")
+async def _clone_admin_only_func(flt, client, update) -> bool:
+    """True only when in clone context AND user is that clone's admin (or ADMIN_ID)."""
+    user = getattr(update, "from_user", None)
+    if not user:
+        return False
+    cfg = _clone_config_ctx.get()
+    if not cfg:
+        return False
+    return user.id == ADMIN_ID or user.id == cfg.get("admin_id")
+
+
+admin_filter       = _pf.create(_admin_filter_func,      name="AdminFilter")
+clone_admin_filter = _pf.create(_clone_admin_only_func,  name="CloneAdminFilter")
 
 
 async def get_bot_username(client: Client) -> str:
@@ -57,7 +90,7 @@ async def get_log_channel() -> int | None:
 
 async def log_event(client: Client, text: str):
     try:
-        cid = await get_log_channel()
+        cid = get_cfg("log_group") or await get_log_channel()
         if cid:
             now = datetime.utcnow().strftime("%Y-%m-%d %H:%M") + " UTC"
             await bot_api("sendMessage", {
@@ -453,7 +486,7 @@ async def do_broadcast(client: Client, session: dict, status_msg: Message):
         "\nUse /broadcast to start a new broadcast anytime.",
         parse_mode=HTML,
     )
-    broadcast_sessions.pop(ADMIN_ID, None)
+    broadcast_sessions.pop(session.get("chat_id", ADMIN_ID), None)
     await log_event(client,
         f"📢 <b>Broadcast Completed</b>\n"
         f"👥 Filter: {aud}\n"

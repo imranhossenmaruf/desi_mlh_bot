@@ -12,17 +12,31 @@ from config import (
     settings_col, inbox_col, conversations_col,
     users_col, premium_col, app,
 )
-from helpers import bot_api, _auto_del, get_rank, get_status, admin_filter
+from helpers import bot_api, _auto_del, get_rank, get_status, admin_filter, get_cfg
 
 
 # ─── Internal helpers ──────────────────────────────────────────────────────────
 
 async def _get_inbox_group() -> int | None:
+    # Clone context wins; fall back to global settings_col
+    clone_ig = get_cfg("inbox_group")
+    if clone_ig:
+        return clone_ig
     doc = await settings_col.find_one({"key": "inbox_group"})
     return doc.get("chat_id") if doc else None
 
 
 async def _set_inbox_group(chat_id: int):
+    from helpers import _clone_config_ctx
+    cfg = _clone_config_ctx.get()
+    if cfg:
+        # In clone context: save to clones_col
+        from config import clones_col
+        from clone_manager import reload_clone_config
+        tok = cfg.get("token")
+        await clones_col.update_one({"token": tok}, {"$set": {"inbox_group": chat_id}})
+        await reload_clone_config(tok)
+        return
     await settings_col.update_one(
         {"key": "inbox_group"},
         {"$set": {"chat_id": chat_id}},
