@@ -4,7 +4,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from config import HTML, ADMIN_ID, users_col, app
-from helpers import log_event, bot_api
+from helpers import log_event, bot_api, admin_filter
 
 
 async def _resolve_user_private(client: Client, message: Message):
@@ -25,7 +25,7 @@ async def _resolve_user_private(client: Client, message: Message):
     return doc["user_id"], doc.get("first_name") or "", doc.get("username")
 
 
-@app.on_message(filters.command("blockuser") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("blockuser") & admin_filter & filters.private)
 async def blockuser_cmd(client: Client, message: Message):
     args = message.command[1:]
     if not args:
@@ -90,7 +90,7 @@ async def blockuser_cmd(client: Client, message: Message):
     await log_event(client, f"🚫 <b>User Blocked</b>\n👤 {mention} — 🆔 <code>{target_id}</code>")
 
 
-@app.on_message(filters.command("unblockuser") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("unblockuser") & admin_filter & filters.private)
 async def unblockuser_cmd(client: Client, message: Message):
     args = message.command[1:]
     if not args:

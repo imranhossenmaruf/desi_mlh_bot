@@ -5,16 +5,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from config import HTML, ADMIN_ID, admins_col, app
-from helpers import _auto_del, log_event
-
-
-# ─── Helper: check if a user is super-admin or sub-admin ─────────────────────
-
-async def is_any_admin(user_id: int) -> bool:
-    if user_id == ADMIN_ID:
-        return True
-    doc = await admins_col.find_one({"user_id": user_id, "active": True})
-    return doc is not None
+from helpers import _auto_del, log_event, is_any_admin
 
 
 async def _get_all_admins() -> list[dict]:

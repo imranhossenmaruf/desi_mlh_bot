@@ -15,6 +15,7 @@ from config import (
 from helpers import (
     parse_date, parse_buttons, has_media, refresh_preview,
     log_event, send_to_user, bot_api, delete_msg_safe, get_bot_username,
+    admin_filter,
 )
 
 
@@ -211,7 +212,7 @@ async def grp_btn_callback(client: Client, cq: CallbackQuery):
 
 
 @app.on_message(
-    filters.user(ADMIN_ID) & filters.private
+    admin_filter & filters.private
     & ~filters.command([
         "start", "help", "stats", "user", "addpoints", "removepoints",
         "setlimit", "export", "broadcast", "sbc", "cancel", "blockuser",
@@ -227,8 +228,9 @@ async def grp_btn_callback(client: Client, cq: CallbackQuery):
     ])
 )
 async def admin_message_handler(client: Client, message: Message):
-    session = broadcast_sessions.get(ADMIN_ID)
-    fj      = fj_sessions.get(ADMIN_ID)
+    uid     = message.from_user.id
+    session = broadcast_sessions.get(uid)
+    fj      = fj_sessions.get(uid)
     text_in = (message.text or "").strip()
     print(f"[ADMIN_MSG] photo={bool(message.photo)} video={bool(message.video)} "
           f"doc={bool(message.document)} text={bool(message.text)} "
@@ -240,7 +242,7 @@ async def admin_message_handler(client: Client, message: Message):
 
         if state == "fj_wait_btn":
             if text_in.lower() == "/cancel":
-                fj_sessions.pop(ADMIN_ID, None)
+                fj_sessions.pop(uid, None)
                 await message.reply_text("🚫 Cancelled.")
                 return
 
@@ -476,7 +478,7 @@ async def admin_message_handler(client: Client, message: Message):
             "media_kind":    session.get("media_kind"),
             "extra_buttons": session.get("extra_buttons"),
         })
-        broadcast_sessions.pop(ADMIN_ID, None)
+        broadcast_sessions.pop(uid, None)
         await delete_msg_safe(client, session["chat_id"], session.get("preview_msg_id"))
         await message.reply_text(
             "⏰ <b>Broadcast Scheduled</b>\n"
@@ -490,7 +492,7 @@ async def admin_message_handler(client: Client, message: Message):
         return
 
 
-@app.on_message(filters.incoming & filters.private & ~filters.user(ADMIN_ID))
+@app.on_message(filters.incoming & filters.private & ~admin_filter)
 async def text_handler(client: Client, message: Message):
     if not message.text:
         return
@@ -542,7 +544,7 @@ async def _run_scheduled(client: Client):
             print(f"[SCHEDULE] Failed to run doc={doc.get('_id')}: {e}")
 
 
-@app.on_message(filters.command("schedule") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("schedule") & admin_filter & filters.private)
 async def schedule_cmd(client: Client, message: Message):
     docs = await scheduled_col.find({}).to_list(length=None)
     if not docs:
@@ -560,7 +562,7 @@ async def schedule_cmd(client: Client, message: Message):
     await message.reply_text("\n".join(lines), parse_mode=HTML)
 
 
-@app.on_message(filters.command("logchannel") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("logchannel") & admin_filter & filters.private)
 async def logchannel_cmd(client: Client, message: Message):
     args = message.command[1:]
     if not args:

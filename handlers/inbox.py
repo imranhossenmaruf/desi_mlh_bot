@@ -12,7 +12,7 @@ from config import (
     settings_col, inbox_col, conversations_col,
     users_col, premium_col, app,
 )
-from helpers import bot_api, _auto_del, get_rank, get_status
+from helpers import bot_api, _auto_del, get_rank, get_status, admin_filter
 
 
 # ─── Internal helpers ──────────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ def _to_csv_bytes(docs: list) -> bytes:
 
 # ─── /setinboxgroup ────────────────────────────────────────────────────────────
 
-@app.on_message(filters.command("setinboxgroup") & filters.user(ADMIN_ID))
+@app.on_message(filters.command("setinboxgroup") & admin_filter)
 async def set_inbox_group_cmd(client: Client, message: Message):
     args = message.command[1:]
 
@@ -357,7 +357,7 @@ async def inbox_group_reply(client: Client, message: Message):
 
 # ─── /user — full profile card when admin replies in inbox group ──────────────
 
-@app.on_message(filters.command("user") & filters.user(ADMIN_ID), group=-2)
+@app.on_message(filters.command("user") & admin_filter, group=-2)
 async def inbox_user_profile_cmd(client: Client, message: Message):
     """In the inbox group: reply to a forwarded message with /user → show full profile."""
     try:
@@ -517,7 +517,7 @@ async def inbox_user_profile_cmd(client: Client, message: Message):
 
 # ─── /chat — export conversation as CSV (private or inbox-group reply) ─────────
 
-@app.on_message(filters.command("chat") & filters.user(ADMIN_ID), group=-2)
+@app.on_message(filters.command("chat") & admin_filter, group=-2)
 async def chat_export_cmd(client: Client, message: Message):
     print(f"[CHAT] triggered  chat={message.chat.id}  args={message.command[1:]}")
     try:
@@ -626,7 +626,7 @@ async def chat_export_cmd(client: Client, message: Message):
 
 # ─── /inbox — list / export CSV / delete ──────────────────────────────────────
 
-@app.on_message(filters.command("inbox") & filters.user(ADMIN_ID), group=-2)
+@app.on_message(filters.command("inbox") & admin_filter, group=-2)
 async def inbox_cmd(client: Client, message: Message):
     print(f"[INBOX_CMD] triggered  chat={message.chat.id}  args={message.command[1:]}")
     try:

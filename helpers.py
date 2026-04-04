@@ -4,7 +4,7 @@ import aiohttp
 import contextvars
 from datetime import datetime, timedelta
 
-from pyrogram import Client, enums
+from pyrogram import Client, enums, filters as _pf
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ChatPermissions
 
 from config import (
@@ -12,6 +12,7 @@ from config import (
     users_col, settings_col, scheduled_col, groups_col,
     broadcast_sessions,
     STATE_CUSTOMIZE,
+    admins_col,
 )
 
 # ── Per-update context: holds the active bot token (main or clone) ────────────
@@ -20,6 +21,25 @@ _bot_token_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 
 BOT_USERNAME_CACHE: str = ""
+
+
+# ── Dynamic admin check (super admin + DB sub-admins) ─────────────────────────
+
+async def is_any_admin(user_id: int) -> bool:
+    if user_id == ADMIN_ID:
+        return True
+    doc = await admins_col.find_one({"user_id": user_id, "active": True})
+    return doc is not None
+
+
+async def _admin_filter_func(flt, client, update) -> bool:
+    user = getattr(update, "from_user", None)
+    if not user:
+        return False
+    return await is_any_admin(user.id)
+
+
+admin_filter = _pf.create(_admin_filter_func, name="AdminFilter")
 
 
 async def get_bot_username(client: Client) -> str:

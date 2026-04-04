@@ -12,10 +12,10 @@ from config import (
     groups_col, conversations_col,
     app,
 )
-from helpers import get_bot_username, get_rank, get_status, log_event, bot_api
+from helpers import get_bot_username, get_rank, get_status, log_event, bot_api, admin_filter
 
 
-@app.on_message(filters.command("stats") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("stats") & admin_filter & filters.private)
 async def stats_handler(client: Client, message: Message):
     wait = await message.reply_text("⏳ Gathering stats...")
     now       = datetime.utcnow()
@@ -119,7 +119,7 @@ async def stats_handler(client: Client, message: Message):
     )
 
 
-@app.on_message(filters.command("user") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("user") & admin_filter & filters.private)
 async def user_lookup_handler(client: Client, message: Message):
     args = message.command[1:]
     if not args:
@@ -188,12 +188,12 @@ async def user_lookup_handler(client: Client, message: Message):
     )
 
 
-@app.on_message(filters.command("addpoints") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("addpoints") & admin_filter & filters.private)
 async def addpoints_handler(client: Client, message: Message):
     await _change_points(message, positive=True)
 
 
-@app.on_message(filters.command("removepoints") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("removepoints") & admin_filter & filters.private)
 async def removepoints_handler(client: Client, message: Message):
     await _change_points(message, positive=False)
 
@@ -268,7 +268,7 @@ async def _change_points(message: Message, positive: bool):
     ))
 
 
-@app.on_message(filters.command("setlimit") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("setlimit") & admin_filter & filters.private)
 async def setlimit_handler(client: Client, message: Message):
     args = message.command[1:]
     if len(args) < 2:
@@ -348,7 +348,7 @@ async def setlimit_handler(client: Client, message: Message):
     ))
 
 
-@app.on_message(filters.command("export") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("export") & admin_filter & filters.private)
 async def export_handler(client: Client, message: Message):
     wait_msg = await message.reply_text("⏳ Preparing CSV export...")
     try:
@@ -396,7 +396,7 @@ async def export_handler(client: Client, message: Message):
         await wait_msg.edit_text(f"❌ Export failed: {e}")
 
 
-@app.on_message(filters.command("clearhistory") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("clearhistory") & admin_filter & filters.private)
 async def clearhistory_cmd(client: Client, message: Message):
     args = message.command[1:]
     if not args:
@@ -531,7 +531,7 @@ async def profile_cmd(client: Client, message: Message):
     )
 
 
-@app.on_message(filters.command("resetcount") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("resetcount") & admin_filter & filters.private)
 async def resetcount_handler(client: Client, message: Message):
     args = message.command[1:]
     if not args:

@@ -9,7 +9,7 @@ from pyrogram.types import (
 )
 
 from config import HTML, ADMIN_ID, groups_col, app
-from helpers import log_event, _auto_del, get_bot_username
+from helpers import log_event, _auto_del, get_bot_username, admin_filter
 
 _URL_ENTITY_TYPES = {MessageEntityType.URL, MessageEntityType.TEXT_LINK}
 
@@ -305,7 +305,7 @@ async def on_left_member(client: Client, message: Message):
 
 # ── Admin command: /groups ────────────────────────────────────────────────────
 
-@app.on_message(filters.command("groups") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("groups") & admin_filter & filters.private)
 async def groups_cmd(client: Client, message: Message):
     docs = await groups_col.find({}).sort("added_at", -1).to_list(length=None)
     if not docs:

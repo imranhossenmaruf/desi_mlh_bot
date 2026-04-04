@@ -15,7 +15,7 @@ from helpers import (
     parse_date, parse_buttons, has_media, send_to_user, do_broadcast,
     auto_delete, refresh_preview, delete_msg_safe,
     kb_audience, kb_customize, kb_confirm, count_targets, audience_label,
-    log_event,
+    log_event, admin_filter,
 )
 
 
@@ -37,7 +37,7 @@ def _new_session(chat_id: int, mode: str = "broadcast") -> dict:
 
 
 @app.on_message(
-    filters.command("broadcast") & filters.user(ADMIN_ID) & filters.private
+    filters.command("broadcast") & admin_filter & filters.private
 )
 async def broadcast_start(client: Client, message: Message):
     session = _new_session(message.chat.id, mode="broadcast")
@@ -48,11 +48,11 @@ async def broadcast_start(client: Client, message: Message):
         parse_mode=HTML,
         reply_markup=kb_audience(),
     )
-    broadcast_sessions[ADMIN_ID] = session
+    broadcast_sessions[message.from_user.id] = session
 
 
 @app.on_message(
-    filters.command("sbc") & filters.user(ADMIN_ID) & filters.private
+    filters.command("sbc") & admin_filter & filters.private
 )
 async def sbc_start(client: Client, message: Message):
     session = _new_session(message.chat.id, mode="sbc")
@@ -63,12 +63,12 @@ async def sbc_start(client: Client, message: Message):
         parse_mode=HTML,
         reply_markup=kb_audience(),
     )
-    broadcast_sessions[ADMIN_ID] = session
+    broadcast_sessions[message.from_user.id] = session
 
 
-@app.on_callback_query(filters.regex("^bc_all$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_all$") & admin_filter)
 async def bc_select_all(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session:
         return await cq.answer("No active session.", show_alert=True)
 
@@ -86,9 +86,9 @@ async def bc_select_all(client: Client, cq: CallbackQuery):
     await cq.answer("✅ All users selected")
 
 
-@app.on_callback_query(filters.regex("^bc_join_after$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_join_after$") & admin_filter)
 async def bc_join_after_cb(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session:
         return await cq.answer("No active session.", show_alert=True)
 
@@ -105,9 +105,9 @@ async def bc_join_after_cb(client: Client, cq: CallbackQuery):
     await cq.answer()
 
 
-@app.on_callback_query(filters.regex("^bc_add_button$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_add_button$") & admin_filter)
 async def bc_add_button(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session or session["state"] != STATE_CUSTOMIZE:
         return await cq.answer("No active session.", show_alert=True)
 
@@ -129,9 +129,9 @@ async def bc_add_button(client: Client, cq: CallbackQuery):
     await cq.answer()
 
 
-@app.on_callback_query(filters.regex("^bc_attach_media$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_attach_media$") & admin_filter)
 async def bc_attach_media(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session or session["state"] != STATE_CUSTOMIZE:
         return await cq.answer("No active session.", show_alert=True)
 
@@ -151,7 +151,7 @@ async def bc_attach_media(client: Client, cq: CallbackQuery):
 
 
 async def _add_quick_button(client, cq, label, url):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session or session["state"] != STATE_CUSTOMIZE:
         return await cq.answer("No active session.", show_alert=True)
     existing = session.get("extra_buttons") or []
@@ -165,7 +165,7 @@ async def _add_quick_button(client, cq, label, url):
     await refresh_preview(client, session)
 
 
-@app.on_callback_query(filters.regex("^bc_quick_buypremium$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_quick_buypremium$") & admin_filter)
 async def bc_quick_buypremium(client: Client, cq: CallbackQuery):
     from config import app as _app
     bot_username = (await _app.get_me()).username
@@ -176,7 +176,7 @@ async def bc_quick_buypremium(client: Client, cq: CallbackQuery):
     )
 
 
-@app.on_callback_query(filters.regex("^bc_quick_profile$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_quick_profile$") & admin_filter)
 async def bc_quick_profile(client: Client, cq: CallbackQuery):
     from config import app as _app
     bot_username = (await _app.get_me()).username
@@ -187,9 +187,9 @@ async def bc_quick_profile(client: Client, cq: CallbackQuery):
     )
 
 
-@app.on_callback_query(filters.regex("^bc_remove_buttons$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_remove_buttons$") & admin_filter)
 async def bc_remove_buttons(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session:
         return await cq.answer("No active session.", show_alert=True)
 
@@ -198,9 +198,9 @@ async def bc_remove_buttons(client: Client, cq: CallbackQuery):
     await refresh_preview(client, session)
 
 
-@app.on_callback_query(filters.regex("^bc_preview$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_preview$") & admin_filter)
 async def bc_preview(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session:
         return await cq.answer("No active session.", show_alert=True)
 
@@ -220,9 +220,9 @@ async def bc_preview(client: Client, cq: CallbackQuery):
         pass
 
 
-@app.on_callback_query(filters.regex("^bc_send_now$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_send_now$") & admin_filter)
 async def bc_send_now(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session or session["state"] != STATE_CUSTOMIZE:
         return await cq.answer("No active session.", show_alert=True)
 
@@ -247,9 +247,9 @@ async def bc_send_now(client: Client, cq: CallbackQuery):
     await cq.answer()
 
 
-@app.on_callback_query(filters.regex("^bc_schedule$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_schedule$") & admin_filter)
 async def bc_schedule_cb(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session or session["state"] != STATE_CUSTOMIZE:
         return await cq.answer("No active session.", show_alert=True)
     session["state"] = STATE_SCHEDULE
@@ -267,9 +267,9 @@ async def bc_schedule_cb(client: Client, cq: CallbackQuery):
     )
 
 
-@app.on_callback_query(filters.regex("^sbc_set_schedule$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^sbc_set_schedule$") & admin_filter)
 async def sbc_set_schedule_cb(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session or session["state"] != STATE_CUSTOMIZE:
         return await cq.answer("No active session.", show_alert=True)
     session["state"] = STATE_SCHEDULE
@@ -287,9 +287,9 @@ async def sbc_set_schedule_cb(client: Client, cq: CallbackQuery):
     )
 
 
-@app.on_callback_query(filters.regex("^bc_edit_post$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_edit_post$") & admin_filter)
 async def bc_edit_post(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session:
         return await cq.answer("No active session.", show_alert=True)
 
@@ -307,9 +307,9 @@ async def bc_edit_post(client: Client, cq: CallbackQuery):
     await cq.answer()
 
 
-@app.on_callback_query(filters.regex("^bc_confirm_send$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_confirm_send$") & admin_filter)
 async def bc_confirm_send(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.get(ADMIN_ID)
+    session = broadcast_sessions.get(cq.from_user.id)
     if not session or session["state"] != STATE_CONFIRM:
         return await cq.answer("No active session.", show_alert=True)
 
@@ -323,7 +323,7 @@ async def bc_confirm_send(client: Client, cq: CallbackQuery):
     asyncio.create_task(do_broadcast(client, session, cq.message))
 
 
-@app.on_callback_query(filters.regex("^bc_cancel$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^bc_cancel$") & admin_filter)
 async def bc_cancel_cb(client: Client, cq: CallbackQuery):
     session = broadcast_sessions.pop(ADMIN_ID, None)
     if session:
@@ -333,7 +333,7 @@ async def bc_cancel_cb(client: Client, cq: CallbackQuery):
 
 
 @app.on_message(
-    filters.command("cancel") & filters.user(ADMIN_ID) & filters.private
+    filters.command("cancel") & admin_filter & filters.private
 )
 async def bc_cancel_cmd(client: Client, message: Message):
     fj = fj_sessions.pop(ADMIN_ID, None)

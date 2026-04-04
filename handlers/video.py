@@ -10,7 +10,7 @@ from config import (
     users_col, videos_col, vid_hist_col, premium_col, del_queue_col,
     app,
 )
-from helpers import get_bot_username, log_event, bot_api, _bot_token_ctx, BOT_TOKEN
+from helpers import get_bot_username, log_event, bot_api, _bot_token_ctx, BOT_TOKEN, admin_filter
 
 
 async def _send_video_to_user(client: Client, user_id: int) -> str:
@@ -354,7 +354,7 @@ async def channel_post_handler(client: Client, message: Message):
 
 
 @app.on_message(
-    filters.incoming & filters.private & filters.user(ADMIN_ID)
+    filters.incoming & filters.private & admin_filter
     & filters.forwarded & filters.video
 )
 async def admin_forward_video(client: Client, message: Message):
@@ -392,7 +392,7 @@ async def admin_forward_video(client: Client, message: Message):
     ))
 
 
-@app.on_message(filters.command("syncvideos") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("syncvideos") & admin_filter & filters.private)
 async def syncvideos_cmd(client: Client, message: Message):
     """Backfill file_ids for all videos in DB that don't have one yet."""
     docs = await videos_col.find({"file_id": {"$exists": False}}).to_list(length=None)
@@ -456,7 +456,7 @@ async def syncvideos_cmd(client: Client, message: Message):
     )
 
 
-@app.on_message(filters.command("listvideos") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("listvideos") & admin_filter & filters.private)
 async def listvideos_cmd(client: Client, message: Message):
     docs = await videos_col.find({}).sort("added_at", 1).to_list(length=None)
     total = len(docs)
@@ -478,7 +478,7 @@ async def listvideos_cmd(client: Client, message: Message):
         await message.reply_text("\n".join(lines), parse_mode=HTML)
 
 
-@app.on_message(filters.command("delvideo") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("delvideo") & admin_filter & filters.private)
 async def delvideo_cmd(client: Client, message: Message):
     args = message.command[1:]
     if not args:
@@ -539,7 +539,7 @@ async def delvideo_cmd(client: Client, message: Message):
         )
 
 
-@app.on_message(filters.command("clearvideos") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("clearvideos") & admin_filter & filters.private)
 async def clearvideos_cmd(client: Client, message: Message):
     args  = message.command[1:]
     total = await videos_col.count_documents({})

@@ -6,7 +6,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from config import HTML, ADMIN_ID, users_col, app
-from helpers import _auto_del
+from helpers import _auto_del, admin_filter
 
 # ── Thresholds ─────────────────────────────────────────────────────────────────
 _WINDOW_SECS   = 15       # rolling window in seconds
@@ -46,7 +46,7 @@ def _block_user(user_id: int):
 
 # ─── Anti-spam handler: private messages, group=3 (before other handlers) ─────
 
-@app.on_message(filters.private & filters.incoming & ~filters.user(ADMIN_ID), group=3)
+@app.on_message(filters.private & filters.incoming & ~admin_filter, group=3)
 async def user_antispam_handler(client: Client, message: Message):
     user = message.from_user
     if not user:

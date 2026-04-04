@@ -6,7 +6,7 @@ from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineK
 from config import (
     HTML, ADMIN_ID, settings_col, fj_sessions, app,
 )
-from helpers import log_event
+from helpers import log_event, admin_filter
 
 
 async def _fj_doc() -> dict:
@@ -152,7 +152,7 @@ def _fj_status_text(doc: dict) -> str:
     return "\n".join(lines)
 
 
-@app.on_message(filters.command("forcejoin") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("forcejoin") & admin_filter & filters.private)
 async def forcejoin_cmd(client: Client, message: Message):
     args = message.command[1:]
     doc  = await _fj_doc()
@@ -293,14 +293,14 @@ async def forcejoin_cmd(client: Client, message: Message):
     await message.reply_text(_fj_status_text(doc))
 
 
-@app.on_message(filters.command("forcejoinadd") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("forcejoinadd") & admin_filter & filters.private)
 async def forcejoinadd_cmd(client: Client, message: Message):
     fj_sessions.pop(ADMIN_ID, None)
     doc = await _fj_doc()
     await _fj_show_add_card(message.reply_text, doc)
 
 
-@app.on_message(filters.command("forcebuttondel") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("forcebuttondel") & admin_filter & filters.private)
 async def forcebuttondel_cmd(client: Client, message: Message):
     doc      = await _fj_doc()
     channels = doc.get("channels", [])
@@ -324,9 +324,9 @@ async def forcebuttondel_cmd(client: Client, message: Message):
     )
 
 
-@app.on_callback_query(filters.regex("^fj_set_button$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^fj_set_button$") & admin_filter)
 async def fj_set_button_cb(client: Client, cq: CallbackQuery):
-    fj_sessions[ADMIN_ID] = {
+    fj_sessions[cq.from_user.id] = {
         "state":               "fj_wait_btn",
         "wizard_msg_id":       cq.message.id,
         "pending_channels":    [],
@@ -353,7 +353,7 @@ async def fj_set_button_cb(client: Client, cq: CallbackQuery):
     await cq.answer()
 
 
-@app.on_callback_query(filters.regex("^fj_confirm$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^fj_confirm$") & admin_filter)
 async def fj_confirm_cb(client: Client, cq: CallbackQuery):
     fj = fj_sessions.pop(ADMIN_ID, None)
     if not fj or fj.get("state") != "fj_add_confirm":
@@ -438,7 +438,7 @@ async def fj_confirm_cb(client: Client, cq: CallbackQuery):
     print(f"[FORCEJOIN] Added {len(pending)} channels: {[c['name'] for c in pending]}")
 
 
-@app.on_callback_query(filters.regex("^fj_cancel$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex("^fj_cancel$") & admin_filter)
 async def fj_cancel_cb(client: Client, cq: CallbackQuery):
     fj_sessions.pop(ADMIN_ID, None)
     await cq.edit_message_text(
@@ -449,7 +449,7 @@ async def fj_cancel_cb(client: Client, cq: CallbackQuery):
     await cq.answer("Cancelled.")
 
 
-@app.on_callback_query(filters.regex(r"^fj_del_(\d+|done)$") & filters.user(ADMIN_ID))
+@app.on_callback_query(filters.regex(r"^fj_del_(\d+|done)$") & admin_filter)
 async def fj_del_cb(client: Client, cq: CallbackQuery):
     data = cq.data
 
