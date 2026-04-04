@@ -1,11 +1,121 @@
 import asyncio
 from datetime import datetime
 
-from pyrogram import Client, filters
-from pyrogram.types import Message, ChatMemberUpdated
+from pyrogram import Client, filters, StopPropagation
+from pyrogram.enums import MessageEntityType, ChatMemberStatus
+from pyrogram.types import (
+    Message, ChatMemberUpdated,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+)
 
 from config import HTML, ADMIN_ID, groups_col, app
-from helpers import log_event
+from helpers import log_event, _auto_del, get_bot_username
+
+_URL_ENTITY_TYPES = {MessageEntityType.URL, MessageEntityType.TEXT_LINK}
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+async def _is_privileged(client: Client, chat_id: int, user_id: int) -> bool:
+    """True if user is the bot's admin OR a group admin/owner."""
+    if user_id == ADMIN_ID:
+        return True
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        return member.status in (ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR)
+    except Exception:
+        return False
+
+
+def _msg_has_link(message: Message) -> bool:
+    entities = (message.entities or []) + (message.caption_entities or [])
+    return any(e.type in _URL_ENTITY_TYPES for e in entities)
+
+
+def _msg_is_forwarded(message: Message) -> bool:
+    return bool(
+        message.forward_from
+        or message.forward_from_chat
+        or message.forward_sender_name
+        or message.forward_date
+    )
+
+
+# ── Anti-forward / Anti-link (highest priority, group=-5) ────────────────────
+
+@app.on_message(filters.group, group=-5)
+async def anti_forward_link(client: Client, message: Message):
+    if not message.from_user:
+        return
+    if not (_msg_is_forwarded(message) or _msg_has_link(message)):
+        return
+
+    user_id = message.from_user.id
+    if await _is_privileged(client, message.chat.id, user_id):
+        return
+
+    name  = message.from_user.first_name or "User"
+    vtype = "forwarded message" if _msg_is_forwarded(message) else "link/URL"
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    m = await client.send_message(
+        message.chat.id,
+        f"⚠️ <b>Warning!</b>  👤 <b>{name}</b>\n\n"
+        f"🚫 Sharing {vtype}s is <b>not allowed</b> in this group.\n"
+        f"🗑️ Your message has been deleted.\n\n"
+        f"⚠️ Repeated violations may result in a ban.",
+        parse_mode=HTML,
+    )
+    asyncio.create_task(_auto_del(m, 20))
+
+
+# ── Group command guard (group=-4) ────────────────────────────────────────────
+
+@app.on_message(filters.group, group=-4)
+async def group_command_guard(client: Client, message: Message):
+    """Block all commands in groups for non-privileged users.
+    /video → redirect message (auto-del 3 min).
+    All other commands → silently deleted.
+    """
+    text = message.text or message.caption or ""
+    if not text.startswith("/"):
+        return
+
+    user_id = message.from_user.id if message.from_user else None
+    if user_id is None:
+        return
+
+    if await _is_privileged(client, message.chat.id, user_id):
+        return
+
+    cmd = text.split()[0].lstrip("/").split("@")[0].lower()
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    if cmd == "video":
+        bot_username = await get_bot_username(client)
+        m = await client.send_message(
+            message.chat.id,
+            "🎬 <b>Videos are only available in private chat!</b>\n\n"
+            "👇 Tap the button below to get your video:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    "🎬 Get Video Now",
+                    url=f"https://t.me/{bot_username}?start=video",
+                )
+            ]]),
+            parse_mode=HTML,
+        )
+        asyncio.create_task(_auto_del(m, 180))
+
+    raise StopPropagation
 
 _BOT_ID: int = 0
 

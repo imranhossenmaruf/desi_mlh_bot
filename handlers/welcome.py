@@ -140,7 +140,7 @@ async def welcome_new_member(client: Client, message: Message):
                 parse_mode=HTML,
                 reply_markup=keyboard,
             )
-            asyncio.create_task(_auto_del(m, 120))
+            asyncio.create_task(_auto_del(m, 60))
         except Exception as e:
             print(f"[WELCOME] Group msg failed: {e}")
 
