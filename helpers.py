@@ -26,8 +26,17 @@ _clone_config_ctx: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
 BOT_USERNAME_CACHE: str = ""
 
 
-def get_cfg(key: str, fallback=None):
-    """Read from active clone config first; fall back to global value."""
+def get_cfg(key: str, fallback=None, client=None):
+    """Read from active clone config first; fall back to global value.
+
+    Priority: client._clone_config > ContextVar > fallback
+    """
+    # Method 1: client attribute (most reliable for handlers)
+    if client is not None:
+        cfg = getattr(client, "_clone_config", None)
+        if cfg and cfg.get(key) is not None:
+            return cfg[key]
+    # Method 2: ContextVar (set by injector per-update)
     cfg = _clone_config_ctx.get()
     if cfg and cfg.get(key) is not None:
         return cfg[key]
@@ -53,9 +62,9 @@ async def _admin_filter_func(flt, client, update) -> bool:
     if not user:
         return False
     uid = user.id
-    cfg = _clone_config_ctx.get()
+    # client attribute is the most reliable (set at clone build time)
+    cfg = getattr(client, "_clone_config", None) or _clone_config_ctx.get()
     if cfg:
-        # Clone context: main super admin OR this clone's admin
         return uid == ADMIN_ID or uid == cfg.get("admin_id")
     return await is_any_admin(uid)
 
@@ -65,7 +74,7 @@ async def _clone_admin_only_func(flt, client, update) -> bool:
     user = getattr(update, "from_user", None)
     if not user:
         return False
-    cfg = _clone_config_ctx.get()
+    cfg = getattr(client, "_clone_config", None) or _clone_config_ctx.get()
     if not cfg:
         return False
     return user.id == ADMIN_ID or user.id == cfg.get("admin_id")
@@ -83,21 +92,36 @@ async def get_bot_username(client: Client) -> str:
     return config.BOT_USERNAME
 
 
-async def get_log_channel() -> int | None:
+async def get_log_channel(client=None) -> int | None:
+    # Priority 1: clone's log_group from client attribute
+    if client is not None:
+        cfg = getattr(client, "_clone_config", None) or _clone_config_ctx.get()
+        if cfg and cfg.get("log_group"):
+            return cfg["log_group"]
+    # Priority 2: ContextVar
+    clone_lg = get_cfg("log_group")
+    if clone_lg:
+        return clone_lg
+    # Priority 3: global settings_col
     doc = await settings_col.find_one({"key": "log_channel"})
     return doc.get("chat_id") if doc else None
 
 
 async def log_event(client: Client, text: str):
     try:
-        cid = get_cfg("log_group") or await get_log_channel()
+        cid = await get_log_channel(client=client)
         if cid:
             now = datetime.utcnow().strftime("%Y-%m-%d %H:%M") + " UTC"
-            await bot_api("sendMessage", {
-                "chat_id":    cid,
-                "text":       f"🗒 <b>LOG</b> | {now}\n\n{text}",
-                "parse_mode": "HTML",
-            })
+            # Use client's own bot token for sending logs
+            bot_token = getattr(client, "_bot_token", None) or _bot_token_ctx.get() or BOT_TOKEN
+            import aiohttp as _aiohttp
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            async with _aiohttp.ClientSession() as _sess:
+                await _sess.post(url, json={
+                    "chat_id":    cid,
+                    "text":       f"🗒 <b>LOG</b> | {now}\n\n{text}",
+                    "parse_mode": "HTML",
+                })
     except Exception as e:
         print(f"[LOG_EVENT] Failed: {e}")
 
