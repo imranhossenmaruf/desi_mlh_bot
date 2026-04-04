@@ -31,7 +31,7 @@ BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 ADMIN_ID  = int(os.environ["ADMIN_ID"])
 
 VIDEO_CHANNEL     = -1002623940581
-DAILY_VIDEO_LIMIT = 10
+DAILY_VIDEO_LIMIT = 5
 VIDEO_REPEAT_DAYS = 7
 
 app = Client("telegram_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -48,32 +48,85 @@ REPLIES = {
 }
 
 PACKAGES = {
-    "bronze": {
-        "label":      "🥉 Bronze",
-        "price":      "$3 USDT",
-        "days":       7,
-        "video_limit": 25,
-        "desc":       "৭ দিন • প্রতিদিন ২৫টি ভিডিও",
+    "starter": {
+        "label":       "🌱 Starter",
+        "price":       "$2 USDT",
+        "price_usd":   2,
+        "days":        3,
+        "video_limit": 15,
+        "desc":        "3 Days • 15 Videos/Day",
     },
-    "silver": {
-        "label":      "🥈 Silver",
-        "price":      "$8 USDT",
-        "days":       30,
-        "video_limit": 50,
-        "desc":       "৩০ দিন • প্রতিদিন ৫০টি ভিডিও",
+    "basic": {
+        "label":       "🥉 Basic",
+        "price":       "$5 USDT",
+        "price_usd":   5,
+        "days":        7,
+        "video_limit": 30,
+        "desc":        "7 Days • 30 Videos/Day",
     },
-    "gold": {
-        "label":      "🥇 Gold",
-        "price":      "$20 USDT",
-        "days":       90,
+    "standard": {
+        "label":       "🥈 Standard",
+        "price":       "$10 USDT",
+        "price_usd":   10,
+        "days":        30,
+        "video_limit": 60,
+        "desc":        "30 Days • 60 Videos/Day",
+    },
+    "pro": {
+        "label":       "🥇 Pro",
+        "price":       "$18 USDT",
+        "price_usd":   18,
+        "days":        60,
+        "video_limit": 100,
+        "desc":        "60 Days • 100 Videos/Day",
+    },
+    "vip": {
+        "label":       "💎 VIP",
+        "price":       "$25 USDT",
+        "price_usd":   25,
+        "days":        90,
         "video_limit": 999,
-        "desc":       "৯০ দিন • Unlimited ভিডিও",
+        "desc":        "90 Days • Unlimited Videos",
+    },
+    "elite": {
+        "label":       "👑 Elite",
+        "price":       "$40 USDT",
+        "price_usd":   40,
+        "days":        180,
+        "video_limit": 999,
+        "desc":        "180 Days • Unlimited Videos",
     },
 }
 
+PACKAGE_ORDER = ["starter", "basic", "standard", "pro", "vip", "elite"]
+
 PAYMENT_METHODS = {
-    "binance":  {"label": "💛 Binance Pay",  "qr": "assets/binance_qr.png",  "name": "Imran_Hossain Maruf"},
-    "redotpay": {"label": "🔴 RedotPay",     "qr": "assets/redotpay_qr.jpg", "id":   "1329722845"},
+    "binance":  {
+        "label": "💛 Binance Pay",
+        "type":  "qr",
+        "qr":    "assets/binance_qr.png",
+        "name":  "Imran_Hossain Maruf",
+        "note":  "Search by name or scan QR in Binance app.",
+    },
+    "redotpay": {
+        "label": "🔴 RedotPay",
+        "type":  "qr",
+        "qr":    "assets/redotpay_qr.jpg",
+        "id":    "1329722845",
+        "note":  "Send to ID or scan QR in RedotPay app.",
+    },
+    "trc20": {
+        "label":   "🔵 USDT (TRC20)",
+        "type":    "address",
+        "address": "TLWiVbyExgrVnwRkWE1xewvTmRtWbnzNn6",
+        "note":    "Send USDT via Tron (TRC20) network only.",
+    },
+    "bep20": {
+        "label":   "🟡 USDT (BEP20)",
+        "type":    "address",
+        "address": "0x73a6c57e75d89F45fF5e5161211B3fb862942531",
+        "note":    "Send USDT via BNB Smart Chain (BEP20) network only.",
+    },
 }
 
 broadcast_sessions:   dict[int, dict]       = {}
