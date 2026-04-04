@@ -7,39 +7,39 @@ from pyrogram.types import Message
 from config import HTML, ADMIN_ID, nightmode_col, app
 from helpers import log_event, _is_admin_msg, bot_api
 
-# Bangladesh Standard Time = UTC+6
+# Bangladesh Standard Time (UTC+6)
 BD_TZ = timezone(timedelta(hours=6))
 
 _RESTRICTED_PERMS = {
-    "can_send_messages":       False,
-    "can_send_audios":         False,
-    "can_send_documents":      False,
-    "can_send_photos":         False,
-    "can_send_videos":         False,
-    "can_send_video_notes":    False,
-    "can_send_voice_notes":    False,
-    "can_send_polls":          False,
-    "can_send_other_messages": False,
+    "can_send_messages":         False,
+    "can_send_audios":           False,
+    "can_send_documents":        False,
+    "can_send_photos":           False,
+    "can_send_videos":           False,
+    "can_send_video_notes":      False,
+    "can_send_voice_notes":      False,
+    "can_send_polls":            False,
+    "can_send_other_messages":   False,
     "can_add_web_page_previews": False,
-    "can_change_info":         False,
-    "can_invite_users":        False,
-    "can_pin_messages":        False,
+    "can_change_info":           False,
+    "can_invite_users":          False,
+    "can_pin_messages":          False,
 }
 
 _OPEN_PERMS = {
-    "can_send_messages":       True,
-    "can_send_audios":         True,
-    "can_send_documents":      True,
-    "can_send_photos":         True,
-    "can_send_videos":         True,
-    "can_send_video_notes":    True,
-    "can_send_voice_notes":    True,
-    "can_send_polls":          True,
-    "can_send_other_messages": True,
+    "can_send_messages":         True,
+    "can_send_audios":           True,
+    "can_send_documents":        True,
+    "can_send_photos":           True,
+    "can_send_videos":           True,
+    "can_send_video_notes":      True,
+    "can_send_voice_notes":      True,
+    "can_send_polls":            True,
+    "can_send_other_messages":   True,
     "can_add_web_page_previews": True,
-    "can_change_info":         False,
-    "can_invite_users":        True,
-    "can_pin_messages":        False,
+    "can_change_info":           False,
+    "can_invite_users":          True,
+    "can_pin_messages":          False,
 }
 
 
@@ -68,30 +68,30 @@ def _in_night_window(h: int, m: int, sh: int, sm: int, eh: int, em: int) -> bool
 
 def _night_activate_msg(sh: int, sm: int, eh: int, em: int) -> str:
     return (
-        "🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙\n"
-        "   🔒 নাইট মোড চালু 🔒\n"
-        "🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙\n\n"
-        "⛔ এখন গ্রুপে মেসেজ বন্ধ আছে।\n"
-        "🛏️ সবাই বিশ্রাম নিন!\n\n"
-        f"⏰ রাত {sh:02d}:{sm:02d} থেকে সকাল {eh:02d}:{em:02d} পর্যন্ত\n"
-        "    (বাংলাদেশ সময় 🇧🇩)\n\n"
-        "😴 শুভ রাত্রি! Good Night! 🌃\n\n"
-        "🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙\n"
+        "🌙━━━━━━━━━━━━━━━━━━━━━━🌙\n"
+        "      🔒  NIGHT MODE ON  🔒\n"
+        "🌙━━━━━━━━━━━━━━━━━━━━━━🌙\n\n"
+        "⛔ Messaging is now <b>DISABLED</b>.\n"
+        "🛏️ Please take a rest — see you tomorrow!\n\n"
+        f"⏰ Active : <b>{sh:02d}:{sm:02d}</b> → <b>{eh:02d}:{em:02d}</b>\n"
+        "🕐 Timezone: Bangladesh (UTC+6)\n\n"
+        "😴 Good Night! Sweet Dreams! 🌃\n\n"
+        "🌙━━━━━━━━━━━━━━━━━━━━━━🌙\n"
         "🤖 DESI MLH SYSTEM"
     )
 
 
 def _night_deactivate_msg(sh: int, sm: int, eh: int, em: int) -> str:
     return (
-        "☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️\n"
-        "   🔓 নাইট মোড বন্ধ 🔓\n"
-        "☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️\n\n"
-        "✅ গ্রুপ এখন সবার জন্য উন্মুক্ত!\n"
-        "💬 এখন মেসেজ করতে পারবেন।\n\n"
-        f"⏰ পরবর্তী নাইট মোড: রাত {sh:02d}:{sm:02d}\n"
-        "    (বাংলাদেশ সময় 🇧🇩)\n\n"
-        "🌅 শুভ সকাল! Good Morning! 🌞\n\n"
-        "☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️\n"
+        "☀️━━━━━━━━━━━━━━━━━━━━━━☀️\n"
+        "     🔓  NIGHT MODE OFF  🔓\n"
+        "☀️━━━━━━━━━━━━━━━━━━━━━━☀️\n\n"
+        "✅ Messaging is now <b>ENABLED</b>!\n"
+        "💬 Feel free to chat again.\n\n"
+        f"⏰ Next night mode at: <b>{sh:02d}:{sm:02d}</b>\n"
+        "🕐 Timezone: Bangladesh (UTC+6)\n\n"
+        "🌅 Good Morning! Have a great day! 🌞\n\n"
+        "☀️━━━━━━━━━━━━━━━━━━━━━━☀️\n"
         "🤖 DESI MLH SYSTEM"
     )
 
@@ -114,41 +114,45 @@ async def _set_permissions(chat_id: int, perms: dict) -> tuple[bool, str]:
 async def nightmode_cmd(client: Client, message: Message):
     if not await _is_admin_msg(client, message):
         await message.reply_text(
-            "❌ শুধুমাত্র গ্রুপ অ্যাডমিন এই কমান্ড ব্যবহার করতে পারবেন।",
+            "❌ Only group admins can use this command.",
             parse_mode=HTML,
         )
         return
 
     args = message.command[1:]
+
+    # ── NO ARGS → show usage + current status ────────────────────────────────
     if not args:
         now_bd = datetime.now(BD_TZ)
         doc    = await nightmode_col.find_one({"chat_id": message.chat.id})
-        status_line = ""
         if doc and doc.get("enabled"):
             sh, sm = doc.get("start_h", 0), doc.get("start_m", 0)
             eh, em = doc.get("end_h", 0),   doc.get("end_m", 0)
             is_restricted = doc.get("is_restricted", False)
-            current = "🔒 এখন বন্ধ (Night Mode চালু)" if is_restricted else "🔓 এখন খোলা"
-            status_line = (
-                f"\n\n📌 <b>বর্তমান অবস্থা:</b> {current}\n"
-                f"🌙 বন্ধ হয়: রাত <code>{sh:02d}:{sm:02d}</code> (বাংলাদেশ সময়)\n"
-                f"☀️ খোলে  : সকাল <code>{eh:02d}:{em:02d}</code> (বাংলাদেশ সময়)"
+            state = "🔒 LOCKED (night mode active)" if is_restricted else "🔓 OPEN (daytime)"
+            status_block = (
+                f"\n\n📌 <b>Current Status:</b> {state}\n"
+                f"🌙 Locks  : <b>{sh:02d}:{sm:02d}</b> (BD Time)\n"
+                f"☀️ Unlocks: <b>{eh:02d}:{em:02d}</b> (BD Time)"
             )
         else:
-            status_line = "\n\n📌 <b>বর্তমান অবস্থা:</b> ❌ নাইট মোড বন্ধ"
+            status_block = "\n\n📌 <b>Current Status:</b> ❌ Night Mode is disabled"
+
         await message.reply_text(
-            "🌙 <b>Night Mode — ব্যবহারের নিয়ম</b>\n"
+            "🌙 <b>Night Mode — Usage Guide</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "▶️ চালু করতে:\n"
-            "<code>/nightmode on 23:00 06:00</code>\n"
-            "  (রাত ১১টায় বন্ধ → ভোর ৬টায় খুলবে)\n\n"
-            "⏹ বন্ধ করতে:\n"
+            "▶️ <b>Enable:</b>\n"
+            "<code>/nightmode on HH:MM HH:MM</code>\n"
+            "Example: <code>/nightmode on 23:00 06:00</code>\n"
+            "(Locks at 11 PM → Unlocks at 6 AM)\n\n"
+            "⏹ <b>Disable:</b>\n"
             "<code>/nightmode off</code>\n\n"
-            "📊 অবস্থা দেখতে:\n"
+            "📊 <b>Status:</b>\n"
             "<code>/nightmode status</code>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🕐 এখন বাংলাদেশ সময়: <b>{now_bd.strftime('%I:%M %p')}</b>"
-            f"{status_line}",
+            "🕐 <b>All times are Bangladesh Time (UTC+6)</b>\n"
+            f"⏱ Current BD Time: <b>{now_bd.strftime('%I:%M %p')}</b>"
+            f"{status_block}",
             parse_mode=HTML,
         )
         return
@@ -165,23 +169,27 @@ async def nightmode_cmd(client: Client, message: Message):
         )
         if not ok:
             await message.reply_text(
-                f"⚠️ নাইট মোড DB তে বন্ধ করা হয়েছে, কিন্তু permissions পরিবর্তন হয়নি।\n"
-                f"❌ কারণ: <code>{err}</code>\n\n"
-                "💡 নিশ্চিত করুন বট গ্রুপে অ্যাডমিন এবং তার Members Restrict করার অনুমতি আছে।",
+                "⚠️ Night Mode disabled in DB, but chat permissions could not be changed.\n"
+                f"❌ Reason: <code>{err}</code>\n\n"
+                "💡 Make sure the bot is an admin with <b>Restrict Members</b> permission.",
                 parse_mode=HTML,
             )
             return
         await message.reply_text(
-            "☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️\n"
-            "   ✅ নাইট মোড বন্ধ করা হয়েছে\n"
-            "☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️☀️\n\n"
-            "💬 গ্রুপ এখন সবার জন্য উন্মুক্ত।\n"
+            "☀️━━━━━━━━━━━━━━━━━━━━━━☀️\n"
+            "   ✅  NIGHT MODE DISABLED\n"
+            "☀️━━━━━━━━━━━━━━━━━━━━━━☀️\n\n"
+            "💬 Chat is now open for everyone.\n"
             "🤖 DESI MLH SYSTEM",
         )
         asyncio.create_task(log_event(client,
             f"🌙 <b>Night Mode Disabled</b>\n"
-            f"📍 Chat: {message.chat.title or message.chat.id}\n"
-            f"👤 By: {message.from_user.first_name} (<code>{message.from_user.id}</code>)"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📍 Chat : {message.chat.title or message.chat.id}\n"
+            f"👤 By   : {message.from_user.first_name} "
+            f"(<code>{message.from_user.id}</code>)\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 DESI MLH SYSTEM"
         ))
         return
 
@@ -193,27 +201,25 @@ async def nightmode_cmd(client: Client, message: Message):
             await message.reply_text(
                 "📊 <b>Night Mode Status</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n"
-                "❌ এই গ্রুপে নাইট মোড বন্ধ আছে।\n"
+                "❌ Night Mode is <b>disabled</b> for this group.\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🕐 এখন: <b>{now_bd.strftime('%I:%M %p')}</b> (বাংলাদেশ সময় 🇧🇩)",
+                f"⏱ Current BD Time: <b>{now_bd.strftime('%I:%M %p')}</b>",
                 parse_mode=HTML,
             )
         else:
             sh, sm = doc.get("start_h", 0), doc.get("start_m", 0)
             eh, em = doc.get("end_h", 0),   doc.get("end_m", 0)
             is_restricted = doc.get("is_restricted", False)
-            h, m   = now_bd.hour, now_bd.minute
-            in_night = _in_night_window(h, m, sh, sm, eh, em)
-            state  = "🔒 বন্ধ (Night Mode চালু)" if is_restricted else "🔓 খোলা (সাধারণ সময়)"
+            state = "🔒 LOCKED — night mode is active" if is_restricted else "🔓 OPEN — daytime"
             await message.reply_text(
                 "📊 <b>Night Mode Status</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"✅ নাইট মোড: <b>চালু</b>\n"
-                f"🌙 বন্ধ হয়  : রাত <b>{sh:02d}:{sm:02d}</b> (বাংলাদেশ সময় 🇧🇩)\n"
-                f"☀️ খোলে    : সকাল <b>{eh:02d}:{em:02d}</b> (বাংলাদেশ সময় 🇧🇩)\n\n"
-                f"📌 বর্তমান অবস্থা: {state}\n"
+                f"✅ Night Mode  : <b>Enabled</b>\n"
+                f"🌙 Locks at   : <b>{sh:02d}:{sm:02d}</b> (BD Time)\n"
+                f"☀️ Unlocks at : <b>{eh:02d}:{em:02d}</b> (BD Time)\n"
+                f"📌 Right Now  : {state}\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🕐 এখন: <b>{now_bd.strftime('%I:%M %p')}</b> (বাংলাদেশ সময় 🇧🇩)",
+                f"⏱ Current BD Time: <b>{now_bd.strftime('%I:%M %p')}</b>",
                 parse_mode=HTML,
             )
         return
@@ -222,11 +228,11 @@ async def nightmode_cmd(client: Client, message: Message):
     if sub == "on":
         if len(args) < 3:
             await message.reply_text(
-                "❌ সময় দিন!\n\n"
-                "✅ সঠিক নিয়ম:\n"
+                "❌ Please provide start and end times.\n\n"
+                "✅ Correct format:\n"
                 "<code>/nightmode on 23:00 06:00</code>\n"
-                "(রাত ১১:০০ থেকে ভোর ০৬:০০ পর্যন্ত বন্ধ থাকবে)\n\n"
-                "⚠️ সময় অবশ্যই বাংলাদেশ সময়ে দিতে হবে 🇧🇩",
+                "(Locks at 11:00 PM → Unlocks at 06:00 AM)\n\n"
+                "⚠️ All times must be in <b>Bangladesh Time (UTC+6)</b>",
                 parse_mode=HTML,
             )
             return
@@ -236,15 +242,15 @@ async def nightmode_cmd(client: Client, message: Message):
 
         if not start_t:
             await message.reply_text(
-                f"❌ শুরুর সময় <code>{args[1]}</code> ভুল!\n"
-                "✅ সঠিক format: <code>HH:MM</code>  যেমন: <code>23:00</code>",
+                f"❌ Invalid start time: <code>{args[1]}</code>\n"
+                "✅ Format must be <code>HH:MM</code>  e.g. <code>23:00</code>",
                 parse_mode=HTML,
             )
             return
         if not end_t:
             await message.reply_text(
-                f"❌ শেষ সময় <code>{args[2]}</code> ভুল!\n"
-                "✅ সঠিক format: <code>HH:MM</code>  যেমন: <code>06:00</code>",
+                f"❌ Invalid end time: <code>{args[2]}</code>\n"
+                "✅ Format must be <code>HH:MM</code>  e.g. <code>06:00</code>",
                 parse_mode=HTML,
             )
             return
@@ -254,7 +260,7 @@ async def nightmode_cmd(client: Client, message: Message):
 
         if (sh * 60 + sm) == (eh * 60 + em):
             await message.reply_text(
-                "❌ শুরু ও শেষের সময় একই হতে পারবে না!",
+                "❌ Start time and end time cannot be the same!",
                 parse_mode=HTML,
             )
             return
@@ -271,41 +277,51 @@ async def nightmode_cmd(client: Client, message: Message):
             upsert=True,
         )
 
+        # If we're currently in the night window, lock immediately
         now_bd = datetime.now(BD_TZ)
         h, m   = now_bd.hour, now_bd.minute
         in_night_now = _in_night_window(h, m, sh, sm, eh, em)
 
-        # যদি এখনই রাতের সময় হয়, তাহলে এখনই lock করে দাও
         if in_night_now:
-            ok, err = await _set_permissions(message.chat.id, _RESTRICTED_PERMS)
+            ok, _ = await _set_permissions(message.chat.id, _RESTRICTED_PERMS)
             if ok:
                 await nightmode_col.update_one(
                     {"chat_id": message.chat.id}, {"$set": {"is_restricted": True}}
                 )
 
+        instant_note = (
+            "⚡ <b>Currently within night window — chat locked immediately!</b>\n\n"
+            if in_night_now else ""
+        )
+
         await message.reply_text(
-            "🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙\n"
-            "  ✅ নাইট মোড সেট করা হয়েছে!\n"
-            "🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙🌙\n\n"
-            f"🔒 বন্ধ হবে  : রাত <b>{sh:02d}:{sm:02d}</b>\n"
-            f"🔓 খুলবে    : সকাল <b>{eh:02d}:{em:02d}</b>\n"
-            f"🇧🇩 সময়জোন  : বাংলাদেশ সময় (UTC+6)\n\n"
-            + ("⚡ <b>এখনই রাতের সময়, গ্রুপ লক করা হয়েছে!</b>\n\n" if in_night_now else "")
+            "🌙━━━━━━━━━━━━━━━━━━━━━━🌙\n"
+            "   ✅  NIGHT MODE ENABLED\n"
+            "🌙━━━━━━━━━━━━━━━━━━━━━━🌙\n\n"
+            f"🔒 Locks at   : <b>{sh:02d}:{sm:02d}</b>\n"
+            f"🔓 Unlocks at : <b>{eh:02d}:{em:02d}</b>\n"
+            "🕐 Timezone   : Bangladesh Time (UTC+6)\n\n"
+            + instant_note
             + "🤖 DESI MLH SYSTEM",
             parse_mode=HTML,
         )
         asyncio.create_task(log_event(client,
-            f"🌙 <b>Night Mode Set</b>\n"
-            f"📍 Chat: {message.chat.title or message.chat.id}\n"
-            f"👤 By: {message.from_user.first_name} (<code>{message.from_user.id}</code>)\n"
-            f"⏰ {sh:02d}:{sm:02d} → {eh:02d}:{em:02d} (BD Time)"
+            f"🌙 <b>Night Mode Enabled</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📍 Chat : {message.chat.title or message.chat.id}\n"
+            f"👤 By   : {message.from_user.first_name} "
+            f"(<code>{message.from_user.id}</code>)\n"
+            f"⏰ Time : {sh:02d}:{sm:02d} → {eh:02d}:{em:02d} (BD Time)\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 DESI MLH SYSTEM"
         ))
         return
 
+    # ── UNKNOWN ───────────────────────────────────────────────────────────────
     await message.reply_text(
-        "❌ অজানা কমান্ড।\n\n"
-        "সঠিক ব্যবহার:\n"
-        "<code>/nightmode on 23:00 06:00</code>\n"
+        "❌ Unknown subcommand.\n\n"
+        "Valid options:\n"
+        "<code>/nightmode on HH:MM HH:MM</code>\n"
         "<code>/nightmode off</code>\n"
         "<code>/nightmode status</code>",
         parse_mode=HTML,
@@ -339,9 +355,9 @@ async def nightmode_loop(client: Client):
                             "parse_mode": "HTML",
                             "text":       _night_activate_msg(sh, sm, eh, em),
                         })
-                        print(f"[NIGHTMODE] 🔒 Locked chat={chat_id} at {h:02d}:{m:02d} BD")
+                        print(f"[NIGHTMODE] Locked  chat={chat_id}  {h:02d}:{m:02d} BD")
                     else:
-                        print(f"[NIGHTMODE] ❌ Lock failed chat={chat_id}: {err}")
+                        print(f"[NIGHTMODE] Lock failed  chat={chat_id}: {err}")
 
                 elif not is_night_time and currently_restricted:
                     ok, err = await _set_permissions(chat_id, _OPEN_PERMS)
@@ -354,9 +370,9 @@ async def nightmode_loop(client: Client):
                             "parse_mode": "HTML",
                             "text":       _night_deactivate_msg(sh, sm, eh, em),
                         })
-                        print(f"[NIGHTMODE] 🔓 Opened chat={chat_id} at {h:02d}:{m:02d} BD")
+                        print(f"[NIGHTMODE] Unlocked chat={chat_id}  {h:02d}:{m:02d} BD")
                     else:
-                        print(f"[NIGHTMODE] ❌ Open failed chat={chat_id}: {err}")
+                        print(f"[NIGHTMODE] Open failed  chat={chat_id}: {err}")
 
         except Exception as e:
             print(f"[NIGHTMODE] Loop error: {e}")
