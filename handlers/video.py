@@ -107,7 +107,7 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
             "🎬 DESI MLH Video\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             f"{usage_line}\n"
-            "⏳ This video deletes in 15 minutes.\n"
+            "⏳ This video deletes in 25 minutes.\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             "🤖 DESI MLH SYSTEM"
         )
@@ -156,7 +156,7 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
         sent_msg_id = resp.get("result", {}).get("message_id")
         if sent_msg_id:
             async def _del_video(mid=sent_msg_id, uid=user_id):
-                await asyncio.sleep(900)
+                await asyncio.sleep(1500)
                 try:
                     await bot_api("deleteMessage", {"chat_id": uid, "message_id": mid})
                 except Exception:
@@ -177,13 +177,15 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
     )
     print(f"[VIDEO] msg={msg_id} → user={user_id}  ({used}/{DAILY_VIDEO_LIMIT})")
     user_doc  = await users_col.find_one({"user_id": user_id})
-    uname_str = f"@{user_doc.get('username')}" if user_doc and user_doc.get("username") else f"<code>{user_id}</code>"
-    fname_str = (user_doc.get("first_name") or "") if user_doc else ""
+    fname_str = (user_doc.get("first_name") or "User") if user_doc else "User"
+    uname_str = f"@{user_doc.get('username')}" if user_doc and user_doc.get("username") else "no username"
+    mention   = f'<a href="tg://user?id={user_id}">{fname_str}</a>'
     asyncio.create_task(log_event(client,
         f"🎬 <b>Video Watched</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 User     : {fname_str} {uname_str}\n"
+        f"🔔 User     : {mention}\n"
         f"🆔 ID       : <code>{user_id}</code>\n"
+        f"📛 Handle   : {uname_str}\n"
         f"🎞 Video ID : <code>{msg_id}</code>\n"
         f"📊 Today    : <b>{used}</b> video(s)\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -266,15 +268,46 @@ async def channel_post_handler(client: Client, message: Message):
         )
     total = await videos_col.count_documents({})
     print(f"[VIDEO] Auto-saved new video msg={message.id}  total={total}")
-    asyncio.create_task(log_event(client,
-        f"📥 <b>Video Auto-Saved</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎞 Video ID  : <code>{message.id}</code>\n"
-        f"📺 Channel   : <code>{VIDEO_CHANNEL}</code>\n"
-        f"📦 Total DB  : <b>{total} video(s)</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 DESI MLH SYSTEM"
-    ))
+
+    async def _log_with_video():
+        from helpers import get_log_channel, bot_api as _bot_api
+        log_ch = await get_log_channel()
+        if not log_ch:
+            return
+        from datetime import datetime as _dt
+        now = _dt.utcnow().strftime("%Y-%m-%d %H:%M") + " UTC"
+        caption = (
+            f"🗒 <b>LOG</b> | {now}\n\n"
+            f"🎬 <b>New Video Posted in Channel</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎞 Video ID  : <code>{message.id}</code>\n"
+            f"📺 Channel   : <code>{VIDEO_CHANNEL}</code>\n"
+            f"📦 Total DB  : <b>{total} video(s)</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 DESI MLH SYSTEM"
+        )
+        try:
+            fwd = await _bot_api("forwardMessage", {
+                "chat_id":      log_ch,
+                "from_chat_id": VIDEO_CHANNEL,
+                "message_id":   message.id,
+            })
+            if fwd.get("ok"):
+                await _bot_api("sendMessage", {
+                    "chat_id":    log_ch,
+                    "text":       caption,
+                    "parse_mode": "HTML",
+                })
+            else:
+                await _bot_api("sendMessage", {
+                    "chat_id":    log_ch,
+                    "text":       caption,
+                    "parse_mode": "HTML",
+                })
+        except Exception as e:
+            print(f"[VIDEO LOG] Failed: {e}")
+
+    asyncio.create_task(_log_with_video())
 
 
 @app.on_message(

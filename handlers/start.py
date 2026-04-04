@@ -85,12 +85,29 @@ async def start_handler(client: Client, message: Message):
             await message.reply_text(err)
         return
 
+    mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
+    uname   = f"@{user.username}" if user.username else "no username"
+
     if is_new:
         asyncio.create_task(log_event(client,
-            f"👤 <b>New User Joined</b>\n"
-            f"Name: {user.first_name} {user.last_name or ''}\n"
-            f"Username: @{user.username or 'none'}\n"
-            f"🆔 <code>{user.id}</code>"
+            f"👤 <b>New User Started Bot</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔔 User    : {mention}\n"
+            f"🆔 ID      : <code>{user.id}</code>\n"
+            f"📛 Handle  : {uname}\n"
+            f"📋 Name    : {user.first_name} {user.last_name or ''}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 DESI MLH SYSTEM"
+        ))
+    else:
+        asyncio.create_task(log_event(client,
+            f"🔄 <b>Existing User Restarted Bot</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔔 User    : {mention}\n"
+            f"🆔 ID      : <code>{user.id}</code>\n"
+            f"📛 Handle  : {uname}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 DESI MLH SYSTEM"
         ))
 
     if is_new and start_param.isdigit():
@@ -116,13 +133,15 @@ async def start_handler(client: Client, message: Message):
                     "chat_id": ref_id,
                     "text":    notif,
                 }))
+                new_mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
+                ref_mention = f'<a href="tg://user?id={ref_id}">{ref_id}</a>'
                 asyncio.create_task(log_event(client,
                     f"🔗 <b>Referral Credit</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"👤 New User  : {user.first_name} {user.last_name or ''}\n"
-                    f"🆔 User ID   : <code>{user.id}</code>\n"
-                    f"🎯 Referred by: <code>{ref_id}</code>\n"
-                    f"💰 Referrer pts: <b>{new_points}</b> (+10)\n"
+                    f"🆕 New User    : {new_mention} (<code>{user.id}</code>)\n"
+                    f"📛 Handle      : @{user.username or 'none'}\n"
+                    f"🎯 Referred by : {ref_mention}\n"
+                    f"💰 Reward      : +10 pts → Total: <b>{new_points}</b>\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"🤖 DESI MLH SYSTEM"
                 ))

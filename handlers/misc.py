@@ -217,7 +217,11 @@ async def grp_btn_callback(client: Client, cq: CallbackQuery):
         "setlimit", "export", "broadcast", "sbc", "cancel", "blockuser",
         "unblockuser", "daily", "video", "listvideos", "delvideo", "clearvideos",
         "forcejoin", "forcejoinadd", "forcebuttondel", "clearhistory",
-        "logchannel", "schedule",
+        "logchannel", "schedule", "setinboxgroup", "syncvideos", "nightmode",
+        "shadowban", "unshadowban", "shadowbans", "clearshadowbans",
+        "addfilter", "delfilter", "filters", "clearfilters",
+        "antiflood", "welcome", "setrules", "rules", "clearrules",
+        "mute", "unmute", "ban", "unban", "warn", "clearwarn",
     ])
 )
 async def admin_message_handler(client: Client, message: Message):

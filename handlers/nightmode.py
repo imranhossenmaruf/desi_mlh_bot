@@ -10,6 +10,17 @@ from helpers import log_event, _is_admin_msg, bot_api
 # Bangladesh Standard Time (UTC+6)
 BD_TZ = timezone(timedelta(hours=6))
 
+
+def _parse_cmd_text(text: str):
+    """Return (cmd_word, args_list) from a raw /command text, or (None, [])."""
+    t = (text or "").lstrip()
+    if not t.startswith("/"):
+        return None, []
+    parts = t.split()
+    word  = parts[0].lower().lstrip("/").split("@")[0]
+    return word, parts[1:]
+
+
 _RESTRICTED_PERMS = {
     "can_send_messages":         False,
     "can_send_audios":           False,
@@ -68,31 +79,29 @@ def _in_night_window(h: int, m: int, sh: int, sm: int, eh: int, em: int) -> bool
 
 def _night_activate_msg(sh: int, sm: int, eh: int, em: int) -> str:
     return (
-        "🌙━━━━━━━━━━━━━━━━━━━━━━🌙\n"
-        "      🔒  NIGHT MODE ON  🔒\n"
-        "🌙━━━━━━━━━━━━━━━━━━━━━━🌙\n\n"
-        "⛔ Messaging is now <b>DISABLED</b>.\n"
-        "🛏️ Please take a rest — see you tomorrow!\n\n"
-        f"⏰ Active : <b>{sh:02d}:{sm:02d}</b> → <b>{eh:02d}:{em:02d}</b>\n"
-        "🕐 Timezone: Bangladesh (UTC+6)\n\n"
-        "😴 Good Night! Sweet Dreams! 🌃\n\n"
-        "🌙━━━━━━━━━━━━━━━━━━━━━━🌙\n"
-        "🤖 DESI MLH SYSTEM"
+        "░▒▓█ 🌙 SYSTEM NIGHT PROTOCOL █▓▒░\n\n"
+        "⚠️ Status: OFFLINE (Night Cycle Initiated)\n"
+        "🌌 The digital gates are now sealed...\n\n"
+        f"🕛 Shutdown Time → {sh:02d}:{sm:02d}\n"
+        f"🌅 Reactivation  → {eh:02d}:{em:02d}\n"
+        "🌍 Zone → Bangladesh (UTC +6)\n\n"
+        "🔕 No commands will be processed during this phase.\n"
+        "✨ Energy recharging… please return after sunrise.\n\n"
+        "░▒▓█ Stay Safe • Stay Silent • Stay Tuned █▓▒░"
     )
 
 
 def _night_deactivate_msg(sh: int, sm: int, eh: int, em: int) -> str:
     return (
-        "☀️━━━━━━━━━━━━━━━━━━━━━━☀️\n"
-        "     🔓  NIGHT MODE OFF  🔓\n"
-        "☀️━━━━━━━━━━━━━━━━━━━━━━☀️\n\n"
-        "✅ Messaging is now <b>ENABLED</b>!\n"
-        "💬 Feel free to chat again.\n\n"
-        f"⏰ Next night mode at: <b>{sh:02d}:{sm:02d}</b>\n"
-        "🕐 Timezone: Bangladesh (UTC+6)\n\n"
-        "🌅 Good Morning! Have a great day! 🌞\n\n"
-        "☀️━━━━━━━━━━━━━━━━━━━━━━☀️\n"
-        "🤖 DESI MLH SYSTEM"
+        "░▒▓█ ☀️ SYSTEM DAY PROTOCOL █▓▒░\n\n"
+        "🟢 Status: ONLINE (Day Cycle Initiated)\n"
+        "🌤 The digital gates are now open...\n\n"
+        "💬 Chat Access → ENABLED\n"
+        "🌅 Night restrictions lifted → Messages are welcome\n"
+        "🌍 Zone → Bangladesh (UTC +6)\n\n"
+        "⚡ All commands can now be processed.\n"
+        "✨ Energy restored… enjoy the day!\n\n"
+        "░▒▓█ Stay Active • Stay Connected • Stay Tuned █▓▒░"
     )
 
 
@@ -139,16 +148,30 @@ async def _set_permissions(chat_id: int, perms: dict) -> tuple[bool, str]:
     return False, f"{desc} | fallback: {desc2}"
 
 
-@app.on_message(filters.command("nightmode") & filters.group)
+@app.on_message(filters.incoming & filters.group, group=-99)
 async def nightmode_cmd(client: Client, message: Message):
+    cmd, args = _parse_cmd_text(message.text or "")
+    if cmd != "nightmode":
+        return
+    print(f"[NIGHTMODE] Command received  chat={message.chat.id}  user={getattr(message.from_user,'id','?')}  args={args}", flush=True)
+    try:
+        await _nightmode_cmd_inner(client, message, args)
+    except Exception as exc:
+        import traceback
+        print(f"[NIGHTMODE] Unhandled exception:\n{traceback.format_exc()}", flush=True)
+        try:
+            await message.reply_text(f"⚠️ Internal error: <code>{exc}</code>", parse_mode=HTML)
+        except Exception:
+            pass
+
+
+async def _nightmode_cmd_inner(client: Client, message: Message, args: list):
     if not await _is_admin_msg(client, message):
         await message.reply_text(
             "❌ Only group admins can use this command.",
             parse_mode=HTML,
         )
         return
-
-    args = message.command[1:]
 
     # ── NO ARGS → show usage + current status ────────────────────────────────
     if not args:
@@ -205,11 +228,15 @@ async def nightmode_cmd(client: Client, message: Message):
             )
             return
         await message.reply_text(
-            "☀️━━━━━━━━━━━━━━━━━━━━━━☀️\n"
-            "   ✅  NIGHT MODE DISABLED\n"
-            "☀️━━━━━━━━━━━━━━━━━━━━━━☀️\n\n"
-            "💬 Chat is now open for everyone.\n"
-            "🤖 DESI MLH SYSTEM",
+            "░▒▓█ ☀️ SYSTEM DAY PROTOCOL █▓▒░\n\n"
+            "🟢 Status: ONLINE (Day Cycle Initiated)\n"
+            "🌤 The digital gates are now open...\n\n"
+            "💬 Chat Access → ENABLED\n"
+            "🌅 Night restrictions lifted → Messages are welcome\n"
+            "🌍 Zone → Bangladesh (UTC +6)\n\n"
+            "⚡ All commands can now be processed.\n"
+            "✨ Energy restored… enjoy the day!\n\n"
+            "░▒▓█ Stay Active • Stay Connected • Stay Tuned █▓▒░"
         )
         asyncio.create_task(log_event(client,
             f"🌙 <b>Night Mode Disabled</b>\n"
@@ -348,15 +375,15 @@ async def nightmode_cmd(client: Client, message: Message):
         )
 
         await message.reply_text(
-            "🌙━━━━━━━━━━━━━━━━━━━━━━🌙\n"
-            "   ✅  NIGHT MODE ENABLED\n"
-            "🌙━━━━━━━━━━━━━━━━━━━━━━🌙\n\n"
-            f"🔒 Locks at   : <b>{sh:02d}:{sm:02d}</b>\n"
-            f"🔓 Unlocks at : <b>{eh:02d}:{em:02d}</b>\n"
-            "🕐 Timezone   : Bangladesh Time (UTC+6)\n\n"
-            + instant_note
-            + "🤖 DESI MLH SYSTEM",
-            parse_mode=HTML,
+            "░▒▓█ 🌙 SYSTEM NIGHT PROTOCOL █▓▒░\n\n"
+            "✅ Night Mode Scheduled!\n\n"
+            f"🕛 Shutdown Time → {sh:02d}:{sm:02d}\n"
+            f"🌅 Reactivation  → {eh:02d}:{em:02d}\n"
+            "🌍 Zone → Bangladesh (UTC +6)\n\n"
+            "🔕 No commands will be processed during night phase.\n"
+            "✨ Energy recharging… please return after sunrise.\n\n"
+            + (f"⚡ Currently within night window — chat locked immediately!\n\n" if in_night_now else "")
+            + "░▒▓█ Stay Safe • Stay Silent • Stay Tuned █▓▒░"
         )
         asyncio.create_task(log_event(client,
             f"🌙 <b>Night Mode Enabled</b>\n"

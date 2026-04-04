@@ -24,6 +24,7 @@ antiflood_col  = db["antiflood_settings"]
 welcome_col    = db["welcome_messages"]
 rules_col      = db["group_rules"]
 premium_col    = db["premium_users"]
+inbox_col      = db["inbox_messages"]
 
 API_ID    = int(os.environ["TELEGRAM_API_ID"])
 API_HASH  = os.environ["TELEGRAM_API_HASH"]

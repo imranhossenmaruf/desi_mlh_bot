@@ -13,4 +13,5 @@ from handlers import (
     shadowban,
     welcome,
     misc,
+    inbox,
 )
