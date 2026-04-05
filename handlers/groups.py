@@ -152,19 +152,24 @@ async def _get_bot_id(client: Client) -> int:
 async def _upsert_group(chat, added_by=None, bot_is_admin: bool = False, can_invite: bool = False):
     added_by_id   = getattr(added_by, "id", None)
     added_by_name = getattr(added_by, "first_name", None) or str(added_by_id)
+    # member_count: available on Chat objects for supergroups/channels
+    member_count  = getattr(chat, "members_count", None)
+    set_data = {
+        "chat_id":          chat.id,
+        "title":            chat.title or str(chat.id),
+        "type":             str(chat.type),
+        "bot_is_admin":     bot_is_admin,
+        "can_invite_users": can_invite,
+        "added_by_id":      added_by_id,
+        "added_by_name":    added_by_name,
+        "updated_at":       datetime.utcnow(),
+    }
+    if member_count is not None:
+        set_data["member_count"] = member_count
     await groups_col.update_one(
         {"chat_id": chat.id},
         {
-            "$set": {
-                "chat_id":          chat.id,
-                "title":            chat.title or str(chat.id),
-                "type":             str(chat.type),
-                "bot_is_admin":     bot_is_admin,
-                "can_invite_users": can_invite,
-                "added_by_id":      added_by_id,
-                "added_by_name":    added_by_name,
-                "updated_at":       datetime.utcnow(),
-            },
+            "$set": set_data,
             "$setOnInsert": {"added_at": datetime.utcnow()},
         },
         upsert=True,
@@ -231,10 +236,17 @@ async def _handle_bot_added(client: Client, chat, added_by=None):
 @app.on_message(filters.new_chat_members, group=50)
 async def on_new_members(client: Client, message: Message):
     bot_id = await _get_bot_id(client)
+    human_count = 0
     for user in message.new_chat_members:
         if user.id == bot_id:
             asyncio.create_task(_handle_bot_added(client, message.chat, message.from_user))
-            break
+        elif not user.is_bot:
+            human_count += 1
+    if human_count:
+        await groups_col.update_one(
+            {"chat_id": message.chat.id},
+            {"$inc": {"member_count": human_count}},
+        )
 
 
 # ── Handler: ChatMemberUpdated (supergroups / channels) ──────────────────────
@@ -273,15 +285,23 @@ async def on_chat_member_updated(client: Client, update: ChatMemberUpdated):
 async def on_left_member(client: Client, message: Message):
     bot_id = await _get_bot_id(client)
     user   = message.left_chat_member
-    if not user or user.id != bot_id:
+    if not user:
         return
-    await _remove_group(message.chat.id)
-    await log_event(client,
-        f"🚪 <b>Bot Removed from Group</b>\n"
-        f"📌 <b>Group:</b> {message.chat.title or message.chat.id}\n"
-        f"🆔 <b>Chat ID:</b> <code>{message.chat.id}</code>"
-    )
-    print(f"[GROUPS] Removed from '{message.chat.title}' ({message.chat.id})")
+    if user.id == bot_id:
+        # Bot was removed from the group
+        await _remove_group(message.chat.id)
+        await log_event(client,
+            f"🚪 <b>Bot Removed from Group</b>\n"
+            f"📌 <b>Group:</b> {message.chat.title or message.chat.id}\n"
+            f"🆔 <b>Chat ID:</b> <code>{message.chat.id}</code>"
+        )
+        print(f"[GROUPS] Removed from '{message.chat.title}' ({message.chat.id})")
+    elif not user.is_bot:
+        # Human member left — decrement stored member count
+        await groups_col.update_one(
+            {"chat_id": message.chat.id},
+            {"$inc": {"member_count": -1}},
+        )
 
 
 # ── Admin command: /groups ────────────────────────────────────────────────────
