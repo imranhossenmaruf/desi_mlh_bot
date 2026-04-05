@@ -21,7 +21,7 @@ from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-from config import app, HTML, settings_col, clones_col
+from config import app, HTML, settings_col, clones_col, groups_col, ADMIN_ID
 from helpers import _is_admin_msg, _auto_del, get_cfg, _clone_config_ctx
 
 
@@ -115,11 +115,10 @@ def _link(user) -> str:
 #
 # Both main bot AND clone bot automatically use the same monitor group.
 
-@app.on_message(filters.command("setmonitorgroup") & filters.private)
+@app.on_message(filters.command("setmonitorgroup") & filters.private, group=-3)
 async def set_monitor_group_private(client: Client, message: Message):
     """Set monitor group from private DM — just send the group ID."""
-    from helpers import admin_filter as _af
-    if message.from_user.id != __import__("config").ADMIN_ID:
+    if message.from_user.id != ADMIN_ID:
         return
 
     args = message.command[1:]
@@ -206,10 +205,9 @@ async def set_monitor_group_group(client: Client, message: Message):
 
 # ── /monitorstatus — check current monitor group and tracking settings ────────
 
-@app.on_message(filters.command("monitorstatus") & filters.private)
+@app.on_message(filters.command("monitorstatus") & filters.private, group=-3)
 async def monitor_status_cmd(client: Client, message: Message):
-    from config import ADMIN_ID as _AID
-    if message.from_user.id != _AID:
+    if message.from_user.id != ADMIN_ID:
         return
     current = await _get_monitor_group(client)
     if current:
@@ -405,3 +403,62 @@ async def monitor_reply_handler(client: Client, message: Message):
         )
         asyncio.create_task(_auto_del(err, 20))
         print(f"[MONITOR] Reply DM failed: {exc}")
+
+
+# ── /groupstats — detailed stats of all groups the bot is in ──────────────────
+
+@app.on_message(filters.command("groupstats") & filters.private, group=-3)
+async def groupstats_cmd(client: Client, message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    await message.reply_text("📊 Fetching group stats…", parse_mode=HTML)
+
+    # ── Fetch all groups from DB ──────────────────────────────────────────────
+    docs = await groups_col.find({}).sort("updated_at", -1).to_list(length=None)
+    total = len(docs)
+    if total == 0:
+        await message.reply_text("📭 Bot is not in any groups yet.", parse_mode=HTML)
+        return
+
+    admin_count    = sum(1 for d in docs if d.get("bot_is_admin"))
+    non_admin      = total - admin_count
+
+    # ── Fetch per-group trackchats settings ──────────────────────────────────
+    trk_docs = await _trk_col().find({}).to_list(length=None)
+    trk_map  = {d["chat_id"]: d.get("enabled", True) for d in trk_docs}
+
+    # ── Summary ──────────────────────────────────────────────────────────────
+    lines = [
+        f"📊 <b>Group Statistics</b>",
+        f"━━━━━━━━━━━━━━━━━━━━━━",
+        f"📌 <b>Total Groups:</b> {total}",
+        f"👑 <b>Bot is Admin:</b> {admin_count}   |   👤 <b>Not Admin:</b> {non_admin}",
+        f"",
+        f"<b>Top Groups</b> (by activity):",
+        f"━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    # ── Per-group list (max 20) ───────────────────────────────────────────────
+    shown = docs[:20]
+    for i, d in enumerate(shown, 1):
+        cid   = d.get("chat_id", "?")
+        title = (d.get("title") or str(cid))[:28]
+        is_admin = "👑" if d.get("bot_is_admin") else "👤"
+        tracking = trk_map.get(cid, True)
+        trk_icon = "📡" if tracking else "🔇"
+        lines.append(f"{i}. {is_admin}{trk_icon} <b>{title}</b>  <code>{cid}</code>")
+
+    if total > 20:
+        lines.append(f"\n<i>…and {total - 20} more groups.</i>")
+
+    lines += [
+        f"",
+        f"<b>Legend:</b>",
+        f"👑 Bot is admin  👤 Not admin",
+        f"📡 Tracking ON   🔇 Tracking OFF",
+        f"",
+        f"<i>Use /trackchats on|off inside a group to toggle tracking.</i>",
+    ]
+
+    await message.reply_text("\n".join(lines), parse_mode=HTML)
