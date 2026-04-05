@@ -15,27 +15,44 @@ from clone_manager import start_all_clones, main_bot_mark_active_in
 # ── Group presence tracker (group=-95) ────────────────────────────────────────
 # Every time the main bot processes a group message, record that chat_id in the
 # in-process set so clone bots immediately know the main bot is there.
-# This runs BEFORE all feature handlers so the set is populated early.
+# New groups are persisted to MongoDB so they survive restarts.
+from clone_manager import _main_bot_groups   # noqa: E402  (used below)
+
 @app.on_message(filters.group, group=-95)
 async def _main_bot_group_tracker(client, message: Message):
-    if message.chat:
-        main_bot_mark_active_in(message.chat.id)
+    if not message.chat:
+        return
+    cid = message.chat.id
+    is_new = cid not in _main_bot_groups
+    main_bot_mark_active_in(cid)
+    if is_new:
+        # Persist so next restart can pre-load without API calls
+        try:
+            from config import db
+            await db["known_groups"].update_one(
+                {"chat_id": cid},
+                {"$set": {"chat_id": cid, "main_bot": True}},
+                upsert=True,
+            )
+        except Exception:
+            pass
 
 
 async def _preload_main_bot_groups():
-    """Pre-populate _main_bot_groups at startup by iterating dialogs.
-    Runs in the background so it doesn't block startup.
+    """Pre-populate _main_bot_groups from MongoDB (known_groups collection).
+    Falls back silently — the per-message tracker + API fallback cover any gaps.
     """
+    from config import db
     count = 0
     try:
-        async for dialog in app.get_dialogs():
-            chat = dialog.chat
-            if chat and hasattr(chat, "type"):
-                t = chat.type.value if hasattr(chat.type, "value") else str(chat.type)
-                if t in ("group", "supergroup"):
-                    main_bot_mark_active_in(chat.id)
-                    count += 1
-        print(f"[CLONE_GUARD] Pre-loaded {count} group(s) — clone bots will be silenced there.")
+        col = db["known_groups"]
+        async for doc in col.find({"main_bot": True}, {"chat_id": 1}):
+            cid = doc.get("chat_id")
+            if cid:
+                main_bot_mark_active_in(int(cid))
+                count += 1
+        if count:
+            print(f"[CLONE_GUARD] Pre-loaded {count} known group(s) from DB.")
     except Exception as e:
         print(f"[CLONE_GUARD] WARNING: Could not pre-load groups: {e}")
 
