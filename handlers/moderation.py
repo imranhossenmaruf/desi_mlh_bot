@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict, deque
 from datetime import datetime, timedelta
 
 import aiohttp
@@ -11,6 +12,25 @@ from helpers import (
     _is_admin_msg, _auto_del, _FULL_PERMS, MAX_WARNS,
     BOT_TOKEN, _clone_config_ctx,
 )
+
+# ── In-process message ID cache ───────────────────────────────────────────────
+# Bots cannot use MTProto search_messages(from_user=…) or get_chat_history in
+# supergroups (BOT_METHOD_INVALID / empty result from Telegram).
+# Solution: record every incoming group message here and use it for /del all.
+#
+# Structure: {chat_id → {user_id → deque([msg_id, …], maxlen=1000)}}
+# Shared across main bot and clone bots (same Python process).
+# Data is lost on restart — only covers messages received since last start.
+_msg_cache: dict[int, dict[int, deque]] = defaultdict(
+    lambda: defaultdict(lambda: deque(maxlen=1000))
+)
+
+
+@app.on_message(filters.group, group=4)
+async def _track_group_msg(client: Client, message: Message):
+    """Record each group message's (chat_id, user_id, msg_id) into the cache."""
+    if message.chat and message.from_user:
+        _msg_cache[message.chat.id][message.from_user.id].append(message.id)
 
 
 def _get_bot_token(client: Client) -> str:
@@ -332,23 +352,26 @@ async def del_cmd(client: Client, message: Message):
             f"🔍 Searching messages from {fname}…"
         )
 
-        # ── Collect all message IDs from this user via Pyrogram search ─────
-        # Pyrogram uses MTProto messages.search with from_id filter —
-        # this works for bots that are admins with can_delete_messages right.
-        msg_ids = []
-        try:
-            async for msg in client.search_messages(chat_id, from_user=uid):
-                msg_ids.append(msg.id)
-        except Exception as e:
-            print(f"[DEL_ALL] search_messages error: {e}")
+        # ── Collect message IDs from in-process cache ─────────────────────
+        # The _track_group_msg handler (group=4) records every group message
+        # into _msg_cache since bot started.  MTProto search_messages/
+        # get_chat_history are unavailable for bots in supergroups.
+        cached = _msg_cache.get(chat_id, {}).get(uid, deque())
+        msg_ids = list(cached)
+
+        # Also include the replied-to message itself (in case it predates cache)
+        replied_id = replied.id
+        if replied_id not in msg_ids:
+            msg_ids.append(replied_id)
 
         if not msg_ids:
             await status_msg.edit_text(
-                f"⚠️ No messages found from <b>{fname}</b> in this group.\n"
-                f"<i>Bot may not have access to full message history.</i>",
+                f"⚠️ No messages tracked from <b>{fname}</b> in this group.\n"
+                f"<i>Bot can only delete messages received since its last restart. "
+                f"Messages sent before that cannot be found.</i>",
                 parse_mode=HTML,
             )
-            asyncio.create_task(_auto_del(status_msg, 20))
+            asyncio.create_task(_auto_del(status_msg, 25))
         else:
             await status_msg.edit_text(
                 f"🗑️ Found <b>{len(msg_ids)}</b> message(s) — deleting…"
