@@ -13,6 +13,19 @@ from config import (
 from helpers import get_bot_username, log_event, bot_api, _bot_token_ctx, BOT_TOKEN, get_cfg, admin_filter, _clone_config_ctx
 
 
+# ── Channel promotional button ────────────────────────────────────────────────
+# Bot API format (dict) — used in sendVideo / copyMessage calls
+_COUPLE_BTN_API = {
+    "inline_keyboard": [[
+        {"text": "🔵✓⃝𝐂𝐎𝐔𝐏𝐋𝐄✓⃝🔵", "url": "https://t.me/+Rbj5D5wXoB4yMjE1"}
+    ]]
+}
+# Pyrogram format — used in send_message / reply_text calls
+_COUPLE_BTN_PY = InlineKeyboardMarkup([[
+    InlineKeyboardButton("🔵✓⃝𝐂𝐎𝐔𝐏𝐋𝐄✓⃝🔵", url="https://t.me/+Rbj5D5wXoB4yMjE1")
+]])
+
+
 def _get_video_channel(client) -> int:
     """Return the video channel for this client (clone or main)."""
     cfg = getattr(client, "_clone_config", None) or _clone_config_ctx.get()
@@ -209,6 +222,7 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
                 "has_spoiler":        True,
                 "protect_content":    True,
                 "supports_streaming": True,
+                "reply_markup":       _COUPLE_BTN_API,
             })
 
         resp = None
@@ -249,6 +263,7 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
                 "parse_mode":      "HTML",
                 "has_spoiler":     True,
                 "protect_content": True,
+                "reply_markup":    _COUPLE_BTN_API,
             })
 
         if not resp.get("ok"):
@@ -756,7 +771,11 @@ async def anti_spam_handler(client: Client, message: Message):
     )
 
     try:
-        warn_msg = await client.send_message(message.chat.id, warn_text, parse_mode=HTML)
+        warn_msg = await client.send_message(
+            message.chat.id, warn_text,
+            parse_mode=HTML,
+            reply_markup=_COUPLE_BTN_PY,
+        )
         async def _del_warn(msg):
             await asyncio.sleep(40)
             try:
