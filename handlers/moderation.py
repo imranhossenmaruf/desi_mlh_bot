@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta
 
+import aiohttp
 from pyrogram import Client, filters
 from pyrogram.types import Message, ChatPermissions
 
@@ -8,7 +9,23 @@ from config import HTML, ADMIN_ID, users_col, app
 from helpers import (
     log_event, _parse_duration, _resolve_target,
     _is_admin_msg, _auto_del, _FULL_PERMS, MAX_WARNS,
+    BOT_TOKEN, _clone_config_ctx,
 )
+
+
+def _get_bot_token(client: Client) -> str:
+    cfg = getattr(client, "_clone_config", None) or _clone_config_ctx.get()
+    if cfg and cfg.get("token"):
+        return cfg["token"]
+    return BOT_TOKEN
+
+
+async def _bot_api(client: Client, method: str, params: dict) -> dict:
+    token = _get_bot_token(client)
+    url   = f"https://api.telegram.org/bot{token}/{method}"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=params) as resp:
+            return await resp.json()
 
 
 @app.on_message(filters.command("mute") & filters.group)
@@ -313,26 +330,36 @@ async def del_cmd(client: Client, message: Message):
         status_msg = await message.reply_text(
             f"🗑️ Deleting all messages from {fname}…"
         )
-        try:
-            from pyrogram.raw import functions as raw_fn
-            await client.invoke(
-                raw_fn.channels.DeleteParticipantHistory(
-                    channel     = await client.resolve_peer(message.chat.id),
-                    participant = await client.resolve_peer(uid),
-                )
-            )
+        # Telegram bots cannot use channels.DeleteParticipantHistory (MTProto).
+        # The Bot API equivalent: banChatMember(revoke_messages=True) then
+        # unbanChatMember — this deletes every message and lets the user rejoin.
+        chat_id = message.chat.id
+        ban_resp = await _bot_api(client, "banChatMember", {
+            "chat_id":         chat_id,
+            "user_id":         uid,
+            "revoke_messages": True,
+        })
+        if not ban_resp.get("ok"):
+            err = ban_resp.get("description", "Unknown error")
+            await status_msg.edit_text(f"❌ Could not delete all messages: {err}")
+            asyncio.create_task(_auto_del(status_msg, 15))
+        else:
+            # Unban immediately so the user can rejoin
+            await _bot_api(client, "unbanChatMember", {
+                "chat_id":       chat_id,
+                "user_id":       uid,
+                "only_if_banned": True,
+            })
             await status_msg.edit_text(
-                f"✅ All messages from <b>{fname}</b> (<code>{uid}</code>) deleted.",
+                f"✅ All messages from <b>{fname}</b> (<code>{uid}</code>) deleted.\n"
+                f"<i>User was temporarily removed to clear messages — they can rejoin.</i>",
                 parse_mode=HTML,
             )
-            asyncio.create_task(_auto_del(status_msg, 20))
+            asyncio.create_task(_auto_del(status_msg, 25))
             asyncio.create_task(log_event(client,
                 f"🗑️ <b>Del All</b>  👤 {fname} <code>{uid}</code>"
                 f"  📍 {message.chat.title or message.chat.id}"
             ))
-        except Exception as e:
-            await status_msg.edit_text(f"❌ Could not delete all messages: {e}")
-            asyncio.create_task(_auto_del(status_msg, 15))
 
         try:
             await message.delete()
