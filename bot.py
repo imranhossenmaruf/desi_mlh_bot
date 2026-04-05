@@ -10,6 +10,7 @@ from tasks import schedule_loop, video_del_loop
 from handlers.nightmode import nightmode_loop
 from handlers.stars_payment import stars_payment_loop
 from clone_manager import start_all_clones, main_bot_mark_active_in
+from handlers.admin import load_package_overrides
 
 
 # ── Group presence tracker (group=-95) ────────────────────────────────────────
@@ -91,6 +92,9 @@ async def main():
     loop.create_task(stars_payment_loop())
     loop.create_task(video_del_loop())
     print("[TASKS] Background loops started (schedule + nightmode + stars_payment + video_del).")
+
+    # Load admin-set package price overrides from MongoDB
+    await load_package_overrides()
 
     await start_all_clones()
     print("[CLONE] Clone startup complete.")
