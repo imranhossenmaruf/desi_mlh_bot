@@ -327,38 +327,63 @@ async def del_cmd(client: Client, message: Message):
         uid   = target_user.id
         fname = target_user.first_name or str(uid)
 
+        chat_id    = message.chat.id
         status_msg = await message.reply_text(
-            f"🗑️ Deleting all messages from {fname}…"
+            f"🔍 Searching messages from {fname}…"
         )
-        # Telegram bots cannot use channels.DeleteParticipantHistory (MTProto).
-        # The Bot API equivalent: banChatMember(revoke_messages=True) then
-        # unbanChatMember — this deletes every message and lets the user rejoin.
-        chat_id = message.chat.id
-        ban_resp = await _bot_api(client, "banChatMember", {
-            "chat_id":         chat_id,
-            "user_id":         uid,
-            "revoke_messages": True,
-        })
-        if not ban_resp.get("ok"):
-            err = ban_resp.get("description", "Unknown error")
-            await status_msg.edit_text(f"❌ Could not delete all messages: {err}")
-            asyncio.create_task(_auto_del(status_msg, 15))
-        else:
-            # Unban immediately so the user can rejoin
-            await _bot_api(client, "unbanChatMember", {
-                "chat_id":       chat_id,
-                "user_id":       uid,
-                "only_if_banned": True,
-            })
+
+        # ── Collect all message IDs from this user via Pyrogram search ─────
+        # Pyrogram uses MTProto messages.search with from_id filter —
+        # this works for bots that are admins with can_delete_messages right.
+        msg_ids = []
+        try:
+            async for msg in client.search_messages(chat_id, from_user=uid):
+                msg_ids.append(msg.id)
+        except Exception as e:
+            print(f"[DEL_ALL] search_messages error: {e}")
+
+        if not msg_ids:
             await status_msg.edit_text(
-                f"✅ All messages from <b>{fname}</b> (<code>{uid}</code>) deleted.\n"
-                f"<i>User was temporarily removed to clear messages — they can rejoin.</i>",
+                f"⚠️ No messages found from <b>{fname}</b> in this group.\n"
+                f"<i>Bot may not have access to full message history.</i>",
                 parse_mode=HTML,
             )
+            asyncio.create_task(_auto_del(status_msg, 20))
+        else:
+            await status_msg.edit_text(
+                f"🗑️ Found <b>{len(msg_ids)}</b> message(s) — deleting…"
+            )
+            # ── Delete in batches of 100 (Telegram limit per call) ─────────
+            deleted = 0
+            failed  = 0
+            for i in range(0, len(msg_ids), 100):
+                batch = msg_ids[i:i + 100]
+                try:
+                    await client.delete_messages(chat_id, batch)
+                    deleted += len(batch)
+                except Exception as batch_err:
+                    print(f"[DEL_ALL] Batch {i//100+1} failed: {batch_err}")
+                    # Try individually
+                    for mid in batch:
+                        try:
+                            await client.delete_messages(chat_id, [mid])
+                            deleted += 1
+                        except Exception:
+                            failed += 1
+                await asyncio.sleep(0.3)  # gentle rate-limiting
+
+            result = (
+                f"✅ <b>Deleted {deleted} message(s)</b> from "
+                f"<b>{fname}</b> (<code>{uid}</code>)"
+            )
+            if failed:
+                result += f"\n⚠️ {failed} message(s) could not be deleted."
+
+            await status_msg.edit_text(result, parse_mode=HTML)
             asyncio.create_task(_auto_del(status_msg, 25))
             asyncio.create_task(log_event(client,
                 f"🗑️ <b>Del All</b>  👤 {fname} <code>{uid}</code>"
-                f"  📍 {message.chat.title or message.chat.id}"
+                f"  🔢 {deleted} msgs  📍 {message.chat.title or message.chat.id}"
             ))
 
         try:
