@@ -54,30 +54,11 @@ async def anti_forward_link(client: Client, message: Message):
     if await _is_privileged(client, message.chat.id, user_id):
         return
 
-    name  = message.from_user.first_name or "User"
-    vtype = "forwarded message" if _msg_is_forwarded(message) else "link/URL"
-
-    deleted = False
     try:
         await message.delete()
-        deleted = True
     except Exception as e:
         print(f"[ANTI-FL] Delete failed in {message.chat.id}: {e}")
-
-    action_line = "🗑️ Your message has been deleted." if deleted else "🚫 Please remove it yourself."
-
-    try:
-        m = await client.send_message(
-            message.chat.id,
-            f"⚠️ <b>Warning!</b>  👤 <b>{name}</b>\n\n"
-            f"🚫 Sharing {vtype}s is <b>not allowed</b> in this group.\n"
-            f"{action_line}\n\n"
-            f"⚠️ Repeated violations may result in a ban.",
-            parse_mode=HTML,
-        )
-        asyncio.create_task(_auto_del(m, 20))
-    except Exception as e:
-        print(f"[ANTI-FL] Warning msg failed in {message.chat.id}: {e}")
+    # Message deleted silently — no warning sent.
 
 
 # ── Group command guard (group=-4) ────────────────────────────────────────────
