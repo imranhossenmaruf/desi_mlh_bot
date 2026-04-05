@@ -105,27 +105,133 @@ def _link(user) -> str:
     return f'<a href="tg://user?id={uid}">{name}</a>'
 
 
-# ── /setmonitorgroup ──────────────────────────────────────────────────────────
+# ── /setmonitorgroup — works from PRIVATE DM or from inside the target group ──
+#
+# From private DM (recommended, no confusion):
+#   /setmonitorgroup -1001234567890
+#
+# From inside the monitor group (bot must be admin there):
+#   /setmonitorgroup
+#
+# Both main bot AND clone bot automatically use the same monitor group.
+
+@app.on_message(filters.command("setmonitorgroup") & filters.private)
+async def set_monitor_group_private(client: Client, message: Message):
+    """Set monitor group from private DM — just send the group ID."""
+    from helpers import admin_filter as _af
+    if message.from_user.id != __import__("config").ADMIN_ID:
+        return
+
+    args = message.command[1:]
+    if not args:
+        # Show current setting + usage
+        current = await _get_monitor_group(client)
+        cur_str = f"<code>{current}</code>" if current else "<i>Not set</i>"
+        await message.reply_text(
+            f"📡 <b>Monitor Group Setup</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Current: {cur_str}\n\n"
+            f"<b>How to set:</b>\n"
+            f"1️⃣ Add the bot as admin to your monitor group\n"
+            f"2️⃣ Get the group ID (forward any message to @userinfobot)\n"
+            f"3️⃣ Send here:\n"
+            f"<code>/setmonitorgroup -1001234567890</code>\n\n"
+            f"<b>✅ Both main bot &amp; clone bot will use the same group.</b>",
+            parse_mode=HTML,
+        )
+        return
+
+    raw = args[0].strip()
+    if not raw.lstrip("-").isdigit():
+        await message.reply_text(
+            "❌ Invalid group ID. Example:\n"
+            "<code>/setmonitorgroup -1001234567890</code>",
+            parse_mode=HTML,
+        )
+        return
+
+    chat_id = int(raw)
+
+    # Verify bot can access this group
+    try:
+        chat = await client.get_chat(chat_id)
+        chat_title = chat.title or str(chat_id)
+    except Exception:
+        chat_title = str(chat_id)
+
+    # Force-save to settings_col (bypasses clone context — shared by all bots)
+    await settings_col.update_one(
+        {"key": "chat_monitor_group"},
+        {"$set": {"chat_id": chat_id}},
+        upsert=True,
+    )
+
+    await message.reply_text(
+        f"✅ <b>Monitor Group Set!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📍 Group: <b>{chat_title}</b>\n"
+        f"🆔 ID: <code>{chat_id}</code>\n\n"
+        f"✔️ Main bot &amp; clone bot will both forward here.\n"
+        f"✔️ Reply to any message → DMs that user.\n"
+        f"✔️ Use /trackchats on/off in any group to toggle.",
+        parse_mode=HTML,
+    )
+    print(f"[MONITOR] Monitor group set → {chat_id} ({chat_title})")
+
 
 @app.on_message(filters.command("setmonitorgroup") & filters.group)
-async def set_monitor_group_cmd(client: Client, message: Message):
+async def set_monitor_group_group(client: Client, message: Message):
+    """Set monitor group from inside the group (fallback method)."""
     if not await _is_admin_msg(client, message):
         return
     chat_id = message.chat.id
-    await _set_monitor_group(chat_id)
+    # Force-save to settings_col (shared by all bots)
+    await settings_col.update_one(
+        {"key": "chat_monitor_group"},
+        {"$set": {"chat_id": chat_id}},
+        upsert=True,
+    )
     m = await message.reply_text(
         f"✅ <b>Monitor Group Set!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📍 ID: <code>{chat_id}</code>\n"
-        f"All group chat messages will now be forwarded here.\n"
-        f"Reply to any forwarded message to DM that user.",
+        f"Both main bot &amp; clone bot will forward messages here.",
         parse_mode=HTML,
     )
-    asyncio.create_task(_auto_del(m, 30))
+    asyncio.create_task(_auto_del(m, 20))
     try:
         await message.delete()
     except Exception:
         pass
+
+
+# ── /monitorstatus — check current monitor group and tracking settings ────────
+
+@app.on_message(filters.command("monitorstatus") & filters.private)
+async def monitor_status_cmd(client: Client, message: Message):
+    from config import ADMIN_ID as _AID
+    if message.from_user.id != _AID:
+        return
+    current = await _get_monitor_group(client)
+    if current:
+        try:
+            chat = await client.get_chat(current)
+            gname = chat.title or str(current)
+        except Exception:
+            gname = str(current)
+        status = f"✅ Set: <b>{gname}</b>  <code>{current}</code>"
+    else:
+        status = "❌ Not set — use /setmonitorgroup &lt;group_id&gt;"
+
+    await message.reply_text(
+        f"📡 <b>Monitor Group Status</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{status}\n\n"
+        f"Both bots share the same group.\n"
+        f"Commands:\n"
+        f"• /setmonitorgroup &lt;id&gt; — change group\n"
+        f"• /trackchats on|off — per-group toggle (in that group)",
+        parse_mode=HTML,
+    )
 
 
 # ── /trackchats on|off — per-group toggle ────────────────────────────────────
