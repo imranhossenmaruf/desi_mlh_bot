@@ -217,9 +217,21 @@ async def _main_bot_group_membership_changed(client: Client, update):
     if is_left:
         main_bot_mark_left(chat_id)
         print(f"[CLONE_GUARD] Main bot left/banned group {chat_id} — clone bots now active")
+        try:
+            await clones_col.database["known_groups"].delete_one({"chat_id": chat_id})
+        except Exception:
+            pass
     else:
         main_bot_mark_active_in(chat_id)
         print(f"[CLONE_GUARD] Main bot joined group {chat_id} — clone bots silenced")
+        try:
+            await clones_col.database["known_groups"].update_one(
+                {"chat_id": chat_id},
+                {"$set": {"chat_id": chat_id, "main_bot": True}},
+                upsert=True,
+            )
+        except Exception:
+            pass
 
 
 async def start_all_clones():
