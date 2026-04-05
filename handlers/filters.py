@@ -1,7 +1,7 @@
 import asyncio
 
 from pyrogram import Client, filters
-from pyrogram.types import Message, ChatPermissions
+from pyrogram.types import Message, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import HTML, ADMIN_ID, filters_col, users_col, app
 from helpers import log_event, _is_admin_msg, _auto_del, MAX_WARNS
@@ -159,11 +159,15 @@ async def filter_enforcer(client: Client, message: Message):
             {"$set": {"warn_count": warns}},
             upsert=True,
         )
+        _couple_btn = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔵✓⃝𝐂𝐎𝐔𝐏𝐋𝐄✓⃝🔵", url="https://t.me/+Rbj5D5wXoB4yMjE1")
+        ]])
         m = await message.reply_text(
             f"⚠️ <b>Filter Warning {warns}/{MAX_WARNS}</b>\n"
             f"👤 {mention}\n"
             f"📋 Trigger: <code>{matched['pattern']}</code>",
             parse_mode=HTML,
+            reply_markup=_couple_btn,
         )
         asyncio.create_task(_auto_del(m, 30))
         if warns >= MAX_WARNS:
