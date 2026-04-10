@@ -6,7 +6,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 from config import (
-    HTML, ADMIN_ID, DAILY_VIDEO_LIMIT,
+    HTML, ADMIN_ID, ADMIN_IDS, DAILY_VIDEO_LIMIT,
     users_col, broadcast_sessions, pending_welcome_msgs,
 )
 from helpers import (
@@ -283,7 +283,7 @@ async def status_callback(client: Client, cq: CallbackQuery):
 
 @app.on_message(filters.command("help") & filters.private)
 async def help_handler(client: Client, message: Message):
-    is_admin = message.from_user.id == ADMIN_ID
+    is_admin = message.from_user.id in ADMIN_IDS
 
     user_text = (
         "━━━━━━━━━━━━━━━━━━━\n"
@@ -379,12 +379,122 @@ async def help_handler(client: Client, message: Message):
         "📝 LOG CHANNEL:\n"
         "/logchannel set [id]         — Set log channel\n"
         "/logchannel off              — Disable logging\n"
-        "/logchannel status           — Show current channel\n"
+        "/logchannel status           — Show current channel\n\n"
+        "👑 SUPER ADMIN ONLY (private chat):\n"
+        "/addadmin [id] [label]       — Add bot admin\n"
+        "/removeadmin [id]            — Remove bot admin\n"
+        "/admins                      — List all admins\n\n"
+        "📊 MONITORING & ACTIVITY:\n"
+        "/setmonitorgroup             — Set monitor group\n"
+        "/monitorstatus               — Show monitor status\n"
+        "/trackchats                  — Track chat activity\n"
+        "/groupdm                     — Send DM to group\n"
+        "/groupstats                  — Show group stats\n\n"
+        "📬 INBOX MANAGEMENT:\n"
+        "/setinboxgroup               — Set inbox group\n"
+        "/chat [id]                   — Start chat with user\n"
+        "/inbox                       — Show inbox\n\n"
+        "📋 CLONE MANAGEMENT:\n"
+        "/addclone [token]            — Add bot clone\n"
+        "/removeclone [id]            — Remove bot clone\n"
+        "/clones                      — List all clones\n"
+        "/cloneconfig [id]            — Configure clone\n"
+        "/setcloneinbox [id]          — Set clone inbox\n"
+        "/setclonelog [id]            — Set clone log\n"
+        "/setupclone [id]             — Setup clone\n\n"
+        "💎 PREMIUM MANAGEMENT:\n"
+        "/buypremium [user] [pkg]     — Buy premium for user\n"
+        "/mypremium                   — Check my premium\n"
+        "/packages                    — List premium packages\n"
+        "/premiumlist                 — List premium users\n"
+        "/profile [user]              — Show user profile\n"
+        "/refreshguard                — Refresh guard\n"
+        "/resetcount [user]           — Reset user count\n"
+        "/revokepremium [user]        — Revoke premium\n"
+        "/setprice [pkg] [price]      — Set package price\n"
+        "/upgrade [user] [pkg]        — Upgrade user premium\n\n"
+        "🏷️ AUTO TAGGING:\n"
+        "/tag [text]                  — Tag users\n"
+        "/tagall [text]               — Tag all users\n\n"
+        "📅 SCHEDULED TASKS:\n"
+        "/schedule                    — View scheduled broadcasts\n\n"
+        "📋 GROUPS MANAGEMENT:\n"
+        "/groups                      — List managed groups\n"
         "━━━━━━━━━━━━━━━━━━━\n"
         "🤖 DESI MLH SYSTEM"
     )
 
-    await message.reply_text(admin_text if is_admin else user_text)
+    if is_admin:
+        # Admin text is too long for one message — split at the midpoint section
+        part1 = (
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "📋 𝑫𝑬𝑺𝑰 𝑴𝑳𝑯 — ALL COMMANDS (1/2)\n"
+            "━━━━━━━━━━━━━━━━━━━\n\n"
+            "👤 USER COMMANDS:\n"
+            "/start  /video  /daily  /help\n\n"
+            "🛡️ GROUP MODERATION (reply to user):\n"
+            "/mute [2D/3H/30M]  /unmute  /ro [dur]\n"
+            "/ban [reason]  /unban  /kick [reason]\n"
+            "/warn  /warns  /clearwarn  /del  /pin  /unpin  /report\n\n"
+            "🌙 NIGHT MODE:\n"
+            "/nightmode on HH:MM HH:MM  |  /nightmode off  |  status\n\n"
+            "🕵️ SHADOW BAN:\n"
+            "/shadowban  /unshadowban  /shadowbans  /clearshadowbans\n\n"
+            "⚙️ FILTERS:\n"
+            "/addfilter [word] [delete|warn|mute|ban]\n"
+            "/delfilter  /filters  /clearfilters\n\n"
+            "🌊 ANTI-FLOOD:\n"
+            "/antiflood on [msgs] [secs] [action]  |  off  |  status\n\n"
+            "👋 WELCOME:\n"
+            "/welcome set [text]  |  off  |  status\n\n"
+            "📜 RULES:\n"
+            "/setrules [text]  /rules  /clearrules\n\n"
+            "👑 ADMIN (private):\n"
+            "/stats  /user [id]  /addpoints  /removepoints\n"
+            "/setlimit  /blockuser  /unblockuser\n"
+            "/clearhistory  /export  /resetcount\n\n"
+            "📹 VIDEO LIBRARY:\n"
+            "/listvideos  /delvideo  /clearvideos  /syncvideos\n\n"
+            "📢 BROADCAST:\n"
+            "/broadcast  /sbc  /cancel\n\n"
+            "📡 FORCE-JOIN:\n"
+            "/forcejoin on|off|list  /forcejoinadd  /forcebuttondel\n"
+            "━━━━━━━━━━━━━━━━━━━"
+        )
+        part2 = (
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "📋 𝑫𝑬𝑺𝑰 𝑴𝑳𝑯 — ALL COMMANDS (2/2)\n"
+            "━━━━━━━━━━━━━━━━━━━\n\n"
+            "📝 LOG CHANNEL:\n"
+            "/logchannel set [id]  |  off  |  status\n\n"
+            "👑 SUPER ADMIN:\n"
+            "/addadmin [id]  /removeadmin  /admins\n\n"
+            "📊 MONITORING:\n"
+            "/setmonitorgroup  /monitorstatus  /trackchats\n"
+            "/groupdm  /groupstats  /overview [period]\n\n"
+            "📬 INBOX:\n"
+            "/setinboxgroup  /chat [id]  /inbox\n\n"
+            "📋 CLONE MANAGEMENT:\n"
+            "/addclone  /removeclone  /clones  /cloneconfig\n"
+            "/setcloneinbox  /setclonelog  /setupclone\n\n"
+            "💎 PREMIUM:\n"
+            "/packages  /setprice  /buypremium  /mypremium\n"
+            "/premiumlist  /profile  /revokepremium  /upgrade\n\n"
+            "🏷️ AUTO TAG:\n"
+            "/tag [text]  /tagall [text]  /taggroup [gid] [msg]\n\n"
+            "📅 SCHEDULE:\n"
+            "/schedule\n\n"
+            "📋 GROUPS:\n"
+            "/groups  /groupstats  /ctrlhelp  /syscheck\n"
+            "/sendall  /sendto  /protect  /protections\n"
+            "/kw add|del|list|clear  — Keyword reply\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "🤖 DESI MLH SYSTEM"
+        )
+        await message.reply_text(part1)
+        await message.reply_text(part2)
+    else:
+        await message.reply_text(user_text)
 
 
 @app.on_message(filters.command("daily") & filters.private)

@@ -284,3 +284,153 @@ async def setprice_cmd(_, message: Message):
         f"Use /packages to view all.",
         parse_mode=HTML,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Group Settings Management — Admin Commands
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.on_message(filters.command("grouplist") & admin_filter & filters.private)
+async def grouplist_cmd(_, message: Message):
+    """List all groups using the bot."""
+    from config import groups_col
+    
+    docs = await groups_col.find({}).to_list(length=100)
+    if not docs:
+        await message.reply_text("📭 No groups found.")
+        return
+    
+    text = f"<b>📊 Groups Using Bot ({len(docs)})</b>\n" "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    for i, doc in enumerate(docs, 1):
+        title = doc.get("title", "Unknown")
+        chat_id = doc.get("chat_id", 0)
+        admin = "✅" if doc.get("bot_is_admin") else "❌"
+        text += f"{i}. <b>{title}</b>\n   🆔 <code>{chat_id}</code> {admin}\n\n"
+    
+    await message.reply_text(text, parse_mode=HTML)
+
+
+@app.on_message(filters.command("groupinfo") & admin_filter & filters.private)
+async def groupinfo_cmd(_, message: Message):
+    """Get info about a specific group."""
+    from config import groups_col, group_settings_col
+    
+    args = message.command[1:]
+    if not args or not args[0].lstrip("-").isdigit():
+        await message.reply_text(
+            "⚠️ Usage: <code>/groupinfo {chat_id}</code>\n\n"
+            "Example: <code>/groupinfo -1001234567890</code>",
+            parse_mode=HTML,
+        )
+        return
+    
+    chat_id = int(args[0])
+    group = await groups_col.find_one({"chat_id": chat_id})
+    settings = await group_settings_col.find_one({"chat_id": chat_id})
+    
+    if not group:
+        await message.reply_text(
+            f"❌ Group <code>{chat_id}</code> not found in database.",
+            parse_mode=HTML,
+        )
+        return
+    
+    text = (
+        "<b>📋 GROUP INFORMATION</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>Title:</b> {group.get('title', 'Unknown')}\n"
+        f"<b>ID:</b> <code>{chat_id}</code>\n"
+        f"<b>Type:</b> {group.get('type', 'Unknown')}\n"
+        f"<b>Members:</b> {group.get('member_count', 'N/A')}\n"
+        f"<b>Bot is Admin:</b> {'✅ Yes' if group.get('bot_is_admin') else '❌ No'}\n"
+        f"<b>Added By:</b> {group.get('added_by_name', 'Unknown')} ({group.get('added_by_id', 'N/A')})\n"
+        f"<b>Added At:</b> {group.get('updated_at', 'N/A')}\n"
+    )
+    
+    if settings:
+        features = settings.get("features", {})
+        enabled = [k for k, v in features.items() if v]
+        text += (
+            f"\n<b>Features Enabled:</b> {len(enabled)}/7\n"
+            f"<b>Auto-Approve:</b> {'✅' if settings.get('auto_approve') else '❌'}\n"
+        )
+    
+    await message.reply_text(text, parse_mode=HTML)
+
+
+@app.on_message(filters.command("resetgroup") & admin_filter & filters.private)
+async def resetgroup_cmd(_, message: Message):
+    """Reset settings for a group."""
+    from config import group_settings_col
+    
+    args = message.command[1:]
+    if not args or not args[0].lstrip("-").isdigit():
+        await message.reply_text(
+            "⚠️ Usage: <code>/resetgroup {chat_id}</code>\n\n"
+            "This will reset all custom settings for the group.",
+            parse_mode=HTML,
+        )
+        return
+    
+    chat_id = int(args[0])
+    
+    # Ask for confirmation
+    from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Confirm", callback_data=f"reset_group_confirm_{chat_id}"),
+        InlineKeyboardButton("❌ Cancel", callback_data="reset_group_cancel"),
+    ]])
+    
+    await message.reply_text(
+        f"⚠️ <b>Reset Group Settings?</b>\n\n"
+        f"Group: <code>{chat_id}</code>\n\n"
+        f"This will remove all custom settings including keywords, reactions, etc.",
+        parse_mode=HTML,
+        reply_markup=kb,
+    )
+
+
+@app.on_message(filters.command("togglegroupfeature") & admin_filter & filters.private)
+async def togglegroupfeature_cmd(_, message: Message):
+    """Toggle a feature for a group."""
+    from handlers.group_settings import get_group_settings, update_group_settings
+    
+    args = message.command[1:]
+    if len(args) < 2:
+        await message.reply_text(
+            "⚠️ Usage: <code>/togglegroupfeature {chat_id} {feature}</code>\n\n"
+            "<b>Features:</b> video, welcome, filters, antiflood, nightmode, auto_reactions, keyword_reply\n\n"
+            "Example: <code>/togglegroupfeature -1001234567890 video</code>",
+            parse_mode=HTML,
+        )
+        return
+    
+    try:
+        chat_id = int(args[0])
+        feature = args[1].lower()
+    except ValueError:
+        await message.reply_text("❌ Invalid chat ID.", parse_mode=HTML)
+        return
+    
+    settings = await get_group_settings(chat_id)
+    features = settings.get("features", {})
+    
+    if feature not in features:
+        await message.reply_text(
+            f"❌ Feature <code>{feature}</code> not found.",
+            parse_mode=HTML,
+        )
+        return
+    
+    features[feature] = not features[feature]
+    await update_group_settings(chat_id, {"features": features})
+    
+    status = "✅ Enabled" if features[feature] else "🔴 Disabled"
+    await message.reply_text(
+        f"<b>Feature Updated</b>\n"
+        f"🆔 Group: <code>{chat_id}</code>\n"
+        f"⚙️ Feature: <code>{feature}</code>\n"
+        f"📊 Status: {status}",
+        parse_mode=HTML,
+    )

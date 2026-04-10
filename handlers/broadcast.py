@@ -325,10 +325,16 @@ async def bc_confirm_send(client: Client, cq: CallbackQuery):
 
 @app.on_callback_query(filters.regex("^bc_cancel$") & admin_filter)
 async def bc_cancel_cb(client: Client, cq: CallbackQuery):
-    session = broadcast_sessions.pop(ADMIN_ID, None)
+    session = broadcast_sessions.pop(cq.from_user.id, None)
     if session:
         await delete_msg_safe(client, session["chat_id"], session.get("preview_msg_id"))
-    await cq.edit_message_text("🚫 Cancelled.\nType /broadcast to start again.")
+    try:
+        await cq.edit_message_text("🚫 Cancelled.\nType /broadcast to start again.")
+    except Exception:
+        try:
+            await cq.message.reply_text("🚫 Cancelled.\nType /broadcast to start again.")
+        except Exception:
+            pass
     await cq.answer()
 
 
@@ -336,7 +342,8 @@ async def bc_cancel_cb(client: Client, cq: CallbackQuery):
     filters.command("cancel") & admin_filter & filters.private
 )
 async def bc_cancel_cmd(client: Client, message: Message):
-    fj = fj_sessions.pop(ADMIN_ID, None)
+    uid = message.from_user.id
+    fj = fj_sessions.pop(uid, None)
     if fj:
         try:
             await client.delete_messages(message.chat.id, fj["wizard_msg_id"])
@@ -349,7 +356,7 @@ async def bc_cancel_cmd(client: Client, message: Message):
         )
         return
 
-    session = broadcast_sessions.pop(ADMIN_ID, None)
+    session = broadcast_sessions.pop(uid, None)
     if session:
         await delete_msg_safe(client, session["chat_id"], session.get("preview_msg_id"))
         await message.reply_text("🚫 Cancelled.\nType /broadcast to start again.")

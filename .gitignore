@@ -1,0 +1,21 @@
+# Environment variables (credentials — never commit)
+.env
+.env.*
+
+# Pyrogram session files
+*.session
+*.session-journal
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

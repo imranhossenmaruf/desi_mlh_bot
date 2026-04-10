@@ -8,6 +8,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from config import (
     HTML, ADMIN_ID, DAILY_VIDEO_LIMIT, VIDEO_CHANNEL, VIDEO_REPEAT_DAYS,
     users_col, videos_col, vid_hist_col, premium_col, del_queue_col,
+    group_settings_col,
     app,
 )
 from helpers import get_bot_username, log_event, bot_api, _bot_token_ctx, BOT_TOKEN, get_cfg, admin_filter, _clone_config_ctx
@@ -346,83 +347,71 @@ async def video_handler_private(client: Client, message: Message):
 
 @app.on_message(filters.command("video") & filters.group)
 async def video_handler_group(client: Client, message: Message):
-    user       = message.from_user
-    fname      = (user.first_name or "User") if user else "User"
-    user_id    = user.id if user else 0
-    bot_uname  = await get_bot_username(client)
+    user    = message.from_user
+    fname   = (user.first_name or "User") if user else "User"
+    user_id = user.id if user else 0
+    if not user_id:
+        return
 
-    doc        = await users_col.find_one({"user_id": user_id}) if user_id else {}
-    doc        = doc or {}
-    today      = datetime.utcnow().strftime("%Y-%m-%d")
-    vid_date   = doc.get("video_date", "")
-    vid_count  = doc.get("video_count", 0) if vid_date == today else 0
+    mention = f'<a href="tg://user?id={user_id}">{fname}</a>'
 
-    from datetime import timezone
-    prem_doc   = await premium_col.find_one({"user_id": user_id}) if user_id else None
-    if prem_doc:
-        exp = prem_doc.get("expires_at")
-        if exp and exp.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
-            raw_limit = prem_doc.get("video_limit", DAILY_VIDEO_LIMIT)
-            pkg_key   = prem_doc.get("package", "")
-            from config import PACKAGES
-            pkg_label = PACKAGES.get(pkg_key, {}).get("label", "Premium")
-            badge     = f"💎 {pkg_label}"
-        else:
-            await premium_col.delete_one({"user_id": user_id})
-            raw_limit = doc.get("video_limit") or DAILY_VIDEO_LIMIT
-            badge     = "👤 Free"
+    # ── Group video setting চেক ─────────────────────────────────────────────
+    grp_cfg  = await group_settings_col.find_one({"chat_id": message.chat.id}) or {}
+    features = grp_cfg.get("features", {})
+    video_on = features.get("video", True)   # True = video চালু (সরাসরি পাঠাও)
+
+    if not video_on:
+        # group_command_guard এটা handle করে; এখানে আসা উচিত না
+        return
+
+    # ── Video ON mode: সরাসরি DM-এ পাঠাও ───────────────────────────────────
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    try:
+        err = await _send_video_to_user(client, user_id)
+    except Exception as exc:
+        err = f"আপনার DM-এ বট start করুন তারপর আবার চেষ্টা করুন।"
+        print(f"[VIDEO_GROUP] _send_video_to_user failed for {user_id}: {exc}")
+
+    if err:
+        # ── Error: DM blocked বা limit reached → group-এ জানাও ───────────
+        bot_uname = await get_bot_username(client)
+        btn = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🎬 Get My Video Now", url=f"https://t.me/{bot_uname}?start=video"),
+            InlineKeyboardButton("💎 Buy Premium",     callback_data="open_buypremium"),
+        ]])
+        grp_msg = await message.reply_text(
+            f"👋 Hey {mention}!\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚠️ <b>{err}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👇 Or tap below to get it in DM:",
+            reply_markup=btn,
+            parse_mode=HTML,
+        )
+        async def _del_err():
+            await asyncio.sleep(60)
+            try:
+                await grp_msg.delete()
+            except Exception:
+                pass
+        asyncio.create_task(_del_err())
     else:
-        raw_limit = doc.get("video_limit") or DAILY_VIDEO_LIMIT
-        badge     = "👤 Free"
-
-    is_unlimited = (raw_limit == -1 or (isinstance(raw_limit, int) and raw_limit >= 999))
-    if is_unlimited:
-        limit_str = "♾️ Unlimited"
-        remaining = "♾️"
-    else:
-        limit_str = str(raw_limit)
-        remaining = str(max(0, raw_limit - vid_count))
-
-    total_vids = await videos_col.count_documents({"channel_id": _get_video_channel(client)})
-    mention    = f'<a href="tg://user?id={user_id}">{fname}</a>' if user_id else fname
-
-    btn = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🎬 Get My Video Now", url=f"https://t.me/{bot_uname}?start=video"),
-        InlineKeyboardButton("💎 Buy Premium",     callback_data="open_buypremium"),
-    ]])
-
-    grp_msg = await message.reply_text(
-        f"╔══════════════════════╗\n"
-        f"      🎬 𝑫𝑬𝑺𝑰 𝑴𝑳𝑯 𝑽𝑰𝑫𝑬𝑶\n"
-        f"╚══════════════════════╝\n\n"
-        f"👋 Hey {mention}!\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 YOUR STATUS:\n"
-        f"   🏷 Account   : {badge}\n"
-        f"   📹 Used Today: {vid_count} / {limit_str}\n"
-        f"   🎯 Remaining : {remaining} videos\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎞 VIDEO LIBRARY:\n"
-        f"   📦 Total Videos : {total_vids:,}\n"
-        f"   🔒 Spoiler Protected\n"
-        f"   ⏳ Auto-Deleted in 25 min\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👇 Tap the button below to\n"
-        f"   receive your video in DM!\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 DESI MLH SYSTEM",
-        reply_markup=btn,
-        parse_mode=HTML,
-    )
-
-    async def _del():
-        await asyncio.sleep(90)
-        try:
-            await grp_msg.delete()
-            await message.delete()
-        except Exception:
-            pass
-    asyncio.create_task(_del())
+        # ── Success: group-এ brief notification ────────────────────────────
+        notify = await message.reply_text(
+            f"🎬 {mention}, আপনার DM-এ ভিডিও পাঠানো হয়েছে! ✅",
+            parse_mode=HTML,
+        )
+        async def _del_ok():
+            await asyncio.sleep(30)
+            try:
+                await notify.delete()
+            except Exception:
+                pass
+        asyncio.create_task(_del_ok())
 
 
 @app.on_message(filters.channel)
@@ -727,13 +716,50 @@ has_link_filter = filters.create(_has_link)
     & (filters.forwarded | has_link_filter)
 )
 async def anti_spam_handler(client: Client, message: Message):
+    """
+    Secondary spam guard for video groups.
+    Only acts when the primary protection system (protection.py) is NOT
+    already covering the violation, so there is no duplicate action.
+    Respects show_warning toggle from /warnon / /warnoff.
+    """
     user = message.from_user
     if not user:
         return
 
+    chat_id   = message.chat.id
+    is_fwd    = bool(
+        message.forward_date or message.forward_from
+        or message.forward_from_chat or message.forward_sender_name
+    )
+    is_link   = not is_fwd  # already filtered by has_link_filter
+
+    # ── Load protection config for this group ────────────────────────────────
+    try:
+        from handlers.protection import _get_prot
+        cfg = await _get_prot(chat_id)
+    except Exception:
+        cfg = {}
+
+    # ── Skip if primary protection.py system is already handling this ─────
+    # protection.py handles anti_forward when cfg["anti_forward"] is True,
+    # and link_protection when cfg["link_protection"] is True.
+    # Letting both systems run causes duplicate deletes + duplicate warnings.
+    if is_fwd and cfg.get("anti_forward"):
+        return
+    if is_link and cfg.get("link_protection"):
+        return
+
+    # ── If neither protection type is enabled → do nothing ───────────────
+    # (This handler should not silently delete when protection is OFF)
+    if is_fwd and not cfg.get("anti_forward"):
+        return
+    if is_link and not cfg.get("link_protection"):
+        return
+
+    # ── Admin / owner bypass ──────────────────────────────────────────────
     try:
         from pyrogram import enums as _enums
-        member = await client.get_chat_member(message.chat.id, user.id)
+        member = await client.get_chat_member(chat_id, user.id)
         if member.status in (
             _enums.ChatMemberStatus.OWNER,
             _enums.ChatMemberStatus.ADMINISTRATOR,
@@ -742,14 +768,19 @@ async def anti_spam_handler(client: Client, message: Message):
     except Exception:
         pass
 
+    # ── Delete the message ────────────────────────────────────────────────
     try:
         await message.delete()
-        print(f"[SPAM] Deleted message from {user.id} in {message.chat.id}")
+        print(f"[SPAM] Deleted message from {user.id} in {chat_id}")
     except Exception as e:
         print(f"[SPAM] Delete failed: {e}")
         return
 
-    if message.forward_date or message.forward_from or message.forward_from_chat:
+    # ── Send warning only if show_warning is ON ───────────────────────────
+    if not cfg.get("show_warning", True):
+        return
+
+    if is_fwd:
         violation = "forwarded message"
         vio_icon  = "📨"
     else:
@@ -772,7 +803,7 @@ async def anti_spam_handler(client: Client, message: Message):
 
     try:
         warn_msg = await client.send_message(
-            message.chat.id, warn_text,
+            chat_id, warn_text,
             parse_mode=HTML,
             reply_markup=_COUPLE_BTN_PY,
         )

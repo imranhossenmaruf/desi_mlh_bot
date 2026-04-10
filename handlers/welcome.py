@@ -70,6 +70,10 @@ async def welcome_cmd(client: Client, message: Message):
     )
 
 
+# ── গ্রুপ-প্রতি শেষ welcome message ট্র্যাক করা (পুরনোটা মুছতে) ─────────────
+_last_welcome: dict[int, int] = {}   # {chat_id: message_id}
+
+
 @app.on_message(filters.new_chat_members, group=5)
 async def welcome_new_member(client: Client, message: Message):
     chat_id      = message.chat.id
@@ -86,7 +90,6 @@ async def welcome_new_member(client: Client, message: Message):
 
         # ── Build welcome text ─────────────────────────────────────────────────
         if doc and doc.get("enabled") and doc.get("text"):
-            # Admin set a custom template → use it
             template = doc["text"]
             grp_text = (
                 template
@@ -95,7 +98,6 @@ async def welcome_new_member(client: Client, message: Message):
                 .replace("{group}", group_title)
             )
         else:
-            # Default welcome card with clickable mention
             grp_text = (
                 "━━━━━━━━━━━━━━━━━━━\n"
                 "✨🎬  𝑾𝑬𝑳𝑪𝑶𝑴𝑬 𝑻𝑶 𝑫𝑬𝑺𝑰 𝑴𝑳𝑯 🎬✨\n"
@@ -118,7 +120,7 @@ async def welcome_new_member(client: Client, message: Message):
                 "━━━━━━━━━━━━━━━━━━━"
             )
 
-        # ── Build buttons (same style as /start, adapted for group) ───────────
+        # ── Build buttons ──────────────────────────────────────────────────────
         _share_text = (
             "░▒▓█ 🔥 DIAMOND BOT ACCESS 🔥 █▓▒░\n\n"
             "🎬 Premium commands live now\n\n"
@@ -139,13 +141,22 @@ async def welcome_new_member(client: Client, message: Message):
             ],
         ])
 
-        # ── Send in group (with auto-delete) ──────────────────────────────────
+        # ── আগের welcome মেসেজ মুছে দাও ──────────────────────────────────────
+        prev_msg_id = _last_welcome.get(chat_id)
+        if prev_msg_id:
+            try:
+                await client.delete_messages(chat_id, prev_msg_id)
+            except Exception:
+                pass
+
+        # ── নতুন welcome পাঠাও ────────────────────────────────────────────────
         try:
             m = await client.send_message(
                 chat_id, grp_text,
                 parse_mode=HTML,
                 reply_markup=keyboard,
             )
+            _last_welcome[chat_id] = m.id
             asyncio.create_task(_auto_del(m, 60))
         except Exception as e:
             if "CHAT_WRITE_FORBIDDEN" not in str(e):

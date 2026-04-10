@@ -3,12 +3,13 @@ import asyncio
 from pyrogram import filters, idle as pyrogram_idle
 from pyrogram.types import Message
 
-from config import app, VIDEO_CHANNEL
-from helpers import get_log_channel
+from config import app, VIDEO_CHANNEL, ADMIN_IDS
+from helpers import get_log_channel, send_to_monitor
 import handlers  # noqa: F401 — registers all handlers via @app decorators
 from tasks import schedule_loop, video_del_loop
 from handlers.nightmode import nightmode_loop
 from handlers.stars_payment import stars_payment_loop
+from handlers.daily_report import daily_report_loop
 from clone_manager import start_all_clones, main_bot_mark_active_in
 from handlers.admin import load_package_overrides
 
@@ -58,6 +59,62 @@ async def _preload_main_bot_groups():
         print(f"[CLONE_GUARD] WARNING: Could not pre-load groups: {e}")
 
 
+async def _startup_health_check():
+    """Run after bot is fully started.
+    সব ঠিক থাকলে কোনো মেসেজ পাঠাবে না।
+    কিছু missing থাকলে admins + monitor group-এ পাঠাবে এবং ২০ সেকেন্ড পর মুছবে।
+    """
+    from datetime import datetime as _dt
+    from handlers.control_group import get_monitor_group, _run_syscheck
+    from config import HTML as _HTML
+
+    await asyncio.sleep(5)  # Let everything settle first
+
+    try:
+        report = await _run_syscheck(app)
+    except Exception as e:
+        report = f"⚠️ syscheck failed: {e}"
+        print(f"[STARTUP_HC] syscheck error: {e}")
+        return
+
+    # সব ঠিক থাকলে পাঠাবে না
+    has_issues = ("❌" in report or "⚠️" in report)
+    if not has_issues:
+        print("[STARTUP_HC] All systems OK — no alert sent.")
+        return
+
+    now_str = _dt.utcnow().strftime("%d %b %Y %H:%M UTC")
+    msg = (
+        f"⚠️ <b>Bot Startup — মিসিং কনফিগ পাওয়া গেছে</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🕛 {now_str}\n\n"
+        f"{report}\n\n"
+        f"<i>(এই মেসেজটি ২০ সেকেন্ড পরে মুছে যাবে)</i>"
+    )
+
+    async def _send_and_del(chat_id):
+        try:
+            sent = await app.send_message(chat_id, msg, parse_mode=_HTML)
+            await asyncio.sleep(20)
+            try:
+                await sent.delete()
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"[STARTUP_HC] Send to {chat_id} failed: {e}")
+
+    tasks = [asyncio.create_task(_send_and_del(aid)) for aid in ADMIN_IDS]
+
+    try:
+        mg = await get_monitor_group()
+        if mg:
+            tasks.append(asyncio.create_task(_send_and_del(mg)))
+    except Exception:
+        pass
+
+    print(f"[STARTUP_HC] Issues found — alert sent to {len(tasks)} recipient(s).")
+
+
 async def main():
     print("Bot is starting...")
     await app.start()
@@ -79,19 +136,30 @@ async def main():
         print(f"[STARTUP] WARNING: Cannot access video channel {VIDEO_CHANNEL}: {e}")
 
     try:
-        log_cid = await get_log_channel()
-        if log_cid:
-            await app.get_chat(log_cid)
-            print(f"[STARTUP] Log channel cached OK ({log_cid})")
+        from config import LOG_CHANNEL as _ENV_LC, db as _db, settings_col as _sc
+        if _ENV_LC:
+            # Sync env LOG_CHANNEL to BOTH MongoDB collections used by the bot
+            await _sc.update_one(                          # bot_settings (read by get_log_channel)
+                {"key": "log_channel"},
+                {"$set": {"key": "log_channel", "chat_id": _ENV_LC}},
+                upsert=True,
+            )
+            await _db["settings"].update_one(              # settings (read by syscheck)
+                {"key": "log_channel"},
+                {"$set": {"key": "log_channel", "chat_id": _ENV_LC}},
+                upsert=True,
+            )
+            print(f"[STARTUP] Log channel synced from env: {_ENV_LC}")
     except Exception as e:
-        print(f"[STARTUP] WARNING: Cannot cache log channel: {e}")
+        print(f"[STARTUP] WARNING: Could not sync log channel: {e}")
 
     loop = asyncio.get_event_loop()
     loop.create_task(schedule_loop(app))
     loop.create_task(nightmode_loop(app))
     loop.create_task(stars_payment_loop())
     loop.create_task(video_del_loop())
-    print("[TASKS] Background loops started (schedule + nightmode + stars_payment + video_del).")
+    loop.create_task(daily_report_loop(app))
+    print("[TASKS] Background loops started (schedule + nightmode + stars_payment + video_del + daily_report).")
 
     # Load admin-set package price overrides from MongoDB
     await load_package_overrides()
@@ -101,6 +169,9 @@ async def main():
 
     # Pre-load groups where main bot is present (silences clone bots immediately)
     asyncio.get_event_loop().create_task(_preload_main_bot_groups())
+
+    # Startup health check — notify admins + monitor group
+    asyncio.get_event_loop().create_task(_startup_health_check())
 
     await pyrogram_idle()
     await app.stop()

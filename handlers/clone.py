@@ -4,7 +4,7 @@ from datetime import datetime
 from pyrogram import Client, filters, StopPropagation, ContinuePropagation
 from pyrogram.types import Message
 
-from config import HTML, ADMIN_ID, clones_col, app
+from config import HTML, ADMIN_ID, ADMIN_IDS, clones_col, app
 from helpers import _auto_del, log_event, get_cfg, _clone_config_ctx
 
 def _get_cfg_from_client(client, key, fallback=None):
@@ -78,7 +78,7 @@ def _get_clone_cfg(client) -> dict | None:
 
 def _check_clone_admin(cfg: dict, uid: int) -> bool:
     """Check if uid is allowed to configure this clone."""
-    if uid == ADMIN_ID:
+    if uid in ADMIN_IDS:
         return True
     admin_id = cfg.get("admin_id")
     return admin_id is not None and uid == admin_id
@@ -553,7 +553,7 @@ async def forward_detect_channel(client: Client, message: Message):
 # MAIN ADMIN: /addclone  /removeclone  /clones
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.on_message(filters.command("addclone") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("addclone") & filters.user(ADMIN_IDS) & filters.private)
 async def addclone_cmd(client: Client, message: Message):
     args = message.command[1:]
     if len(args) < 2:
@@ -643,7 +643,7 @@ async def addclone_cmd(client: Client, message: Message):
         )
 
 
-@app.on_message(filters.command("removeclone") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("removeclone") & filters.user(ADMIN_IDS) & filters.private)
 async def removeclone_cmd(client: Client, message: Message):
     docs = await clones_col.find({"active": True}).to_list(length=100)
     if not docs:
@@ -678,7 +678,7 @@ async def removeclone_cmd(client: Client, message: Message):
     await log_event(client, f"🗑 <b>Clone Removed</b>\n📌 {doc.get('name','?')}")
 
 
-@app.on_message(filters.command("clones") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("clones") & filters.user(ADMIN_IDS) & filters.private)
 async def clones_list_cmd(client: Client, message: Message):
     from clone_manager import get_active_clones
     docs    = await clones_col.find({"active": True}).to_list(length=100)
@@ -716,7 +716,7 @@ async def clones_list_cmd(client: Client, message: Message):
 # MAIN ADMIN: /refreshguard — clear group presence cache
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.on_message(filters.command("refreshguard") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("refreshguard") & filters.user(ADMIN_IDS) & filters.private)
 async def refreshguard_cmd(client: Client, message: Message):
     """Clears the clone group-priority cache.
     Useful after removing the main bot from a group so clones can take over.

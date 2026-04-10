@@ -23,7 +23,7 @@ from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from config import app, HTML, settings_col, clones_col, groups_col, ADMIN_ID
+from config import app, HTML, settings_col, clones_col, groups_col, ADMIN_ID, ADMIN_IDS
 from helpers import _is_admin_msg, _auto_del, get_cfg, _clone_config_ctx
 
 
@@ -132,7 +132,7 @@ def _link(user) -> str:
 @app.on_message(filters.command("setmonitorgroup") & filters.private, group=-3)
 async def set_monitor_group_private(client: Client, message: Message):
     """Set monitor group from private DM — just send the group ID."""
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     args = message.command[1:]
@@ -192,7 +192,7 @@ async def set_monitor_group_private(client: Client, message: Message):
     print(f"[MONITOR] Monitor group set → {chat_id} ({chat_title})")
 
 
-@app.on_message(filters.command("setmonitorgroup") & filters.group)
+@app.on_message(filters.command("setmonitorgroup") & filters.group, group=1)
 async def set_monitor_group_group(client: Client, message: Message):
     """Set monitor group from inside the group (fallback method)."""
     if not await _is_admin_msg(client, message):
@@ -221,7 +221,7 @@ async def set_monitor_group_group(client: Client, message: Message):
 
 @app.on_message(filters.command("monitorstatus") & filters.private, group=-3)
 async def monitor_status_cmd(client: Client, message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
     current = await _get_monitor_group(client)
     if current:
@@ -248,7 +248,7 @@ async def monitor_status_cmd(client: Client, message: Message):
 
 # ── /trackchats on|off — per-group toggle ────────────────────────────────────
 
-@app.on_message(filters.command("trackchats") & filters.group)
+@app.on_message(filters.command("trackchats") & filters.group, group=1)
 async def trackchats_cmd(client: Client, message: Message):
     if not await _is_admin_msg(client, message):
         return
@@ -305,9 +305,13 @@ _CONTENT_FILTER = (
     group=-5,           # runs BEFORE clone_guard (group=-4) — both main+clone can fire
 )
 async def forward_to_monitor(client: Client, message: Message):
-    if not message.from_user:
+    # Forwarding is now handled exclusively by monitor.py (relay_group_msg_to_monitor).
+    # This handler is kept for PATH-B DB records only but disabled to avoid double-forward.
+    return
+
+    if not message.from_user:  # noqa: unreachable
         return
-    if message.from_user.is_bot:
+    if message.from_user.is_bot or message.from_user.is_self:
         return
     if (message.text or message.caption or "").lstrip().startswith("/"):
         return
@@ -336,39 +340,50 @@ async def forward_to_monitor(client: Client, message: Message):
         return   # Already forwarded by the other bot instance
     _fwd_dedup[key] = now   # Claim this forward (atomic in asyncio single-thread)
 
-    user       = message.from_user
-    uid        = user.id
-    name       = user.first_name or "User"
+    uid        = message.from_user.id
+    name       = message.from_user.first_name or "User"
     group_id   = message.chat.id
     group_title = message.chat.title or str(group_id)
 
-    # ── Minimal header: group name + "Reply in Group" button ──────────────────
-    header = f"📍 <b>{group_title}</b>"
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("📢 Reply in Group", callback_data=f"mgr:{group_id}"),
-    ]])
-
+    # ── সরাসরি message forward করো (header ছাড়া) ──────────────────────────────
     try:
-        header_msg = await client.send_message(
-            monitor_id, header, parse_mode=HTML, reply_markup=keyboard
-        )
-        copied = await client.copy_message(
+        fwd = await client.forward_messages(
             chat_id=monitor_id,
             from_chat_id=message.chat.id,
-            message_id=message.id,
+            message_ids=message.id,
         )
+        # forward_messages returns Message or List[Message]
+        if isinstance(fwd, list):
+            fwd = fwd[0] if fwd else None
+        fwd_msg_id = fwd.id if fwd else None
+
+        # ── forward হওয়া message-এ reaction দাও ──────────────────────────────
+        if fwd_msg_id:
+            for emoji in ("👁", "👀", "👍"):
+                try:
+                    await client.send_reaction(
+                        chat_id=monitor_id,
+                        message_id=fwd_msg_id,
+                        emoji=emoji,
+                    )
+                    break
+                except Exception:
+                    continue
+
         await _mon_col().insert_one({
-            "header_msg_id": header_msg.id,
-            "copied_msg_id": copied.id if copied else None,
-            "user_id":       uid,
-            "user_name":     name,
-            "group_title":   group_title,
-            "group_id":      group_id,
-            "monitor_id":    monitor_id,
-            "created_at":    datetime.utcnow(),
+            "fwd_msg_id":     fwd_msg_id,
+            "header_msg_id":  fwd_msg_id,   # backward compat for PATH B lookup
+            "copied_msg_id":  fwd_msg_id,   # backward compat for PATH B lookup
+            "original_msg_id": message.id,
+            "user_id":        uid,
+            "user_name":      name,
+            "group_title":    group_title,
+            "group_id":       group_id,
+            "monitor_id":     monitor_id,
+            "created_at":     datetime.utcnow(),
         })
     except Exception as exc:
-        _fwd_dedup.pop(key, None)   # Release claim so the other bot can retry
+        _fwd_dedup.pop(key, None)
         print(f"[MONITOR] Forward failed from {group_id}: {exc}")
 
 
@@ -378,7 +393,7 @@ async def forward_to_monitor(client: Client, message: Message):
 async def monitor_greply_cb(client: Client, cq: CallbackQuery):
     """Admin clicks 'Reply in Group' on a monitor header → bot sends a prompt."""
     uid = cq.from_user.id if cq.from_user else 0
-    if uid != ADMIN_ID:
+    if uid not in ADMIN_IDS:
         from config import admins_col
         is_admin = await admins_col.find_one({"user_id": uid, "active": True})
         if not is_admin:
@@ -463,32 +478,33 @@ async def monitor_reply_handler(client: Client, message: Message):
     if not doc:
         return  # Not a tracked message — ignore
 
-    user_id     = doc["user_id"]
-    group_title = doc.get("group_title", "a group")
+    group_id        = doc.get("group_id")
+    group_title     = doc.get("group_title", "a group")
+    original_msg_id = doc.get("original_msg_id")
 
-    intro = (
-        f"📩 <b>Admin Reply</b>\n"
-        f"<i>(regarding your message in {group_title})</i>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
-    )
+    if not group_id:
+        err = await message.reply_text("❌ Group ID পাওয়া যায়নি।", parse_mode=HTML)
+        asyncio.create_task(_auto_del(err, 15))
+        return
+
     try:
-        await client.send_message(user_id, intro, parse_mode=HTML)
         await client.copy_message(
-            chat_id=user_id,
+            chat_id=group_id,
             from_chat_id=message.chat.id,
             message_id=message.id,
+            reply_to_message_id=original_msg_id,
         )
         confirm = await message.reply_text(
-            f"✅ DM sent to <code>{user_id}</code>", parse_mode=HTML
+            f"✅ Reply sent to group <b>{group_title}</b>", parse_mode=HTML
         )
         asyncio.create_task(_auto_del(confirm, 8))
     except Exception as exc:
         err = await message.reply_text(
-            f"❌ DM failed to <code>{user_id}</code>: <code>{exc}</code>",
+            f"❌ Reply failed to group <code>{group_id}</code>: <code>{exc}</code>",
             parse_mode=HTML,
         )
         asyncio.create_task(_auto_del(err, 20))
-        print(f"[MONITOR] Reply DM failed: {exc}")
+        print(f"[MONITOR] Reply to group failed: {exc}")
 
 
 # ── /groupdm — DM a message to ALL members of a selected group ───────────────
@@ -502,7 +518,7 @@ async def monitor_reply_handler(client: Client, message: Message):
 
 @app.on_message(filters.command("groupdm") & filters.private, group=-3)
 async def groupdm_start(client: Client, message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     args = message.command[1:]
@@ -557,7 +573,7 @@ async def groupdm_start(client: Client, message: Message):
 
 @app.on_callback_query(filters.regex(r"^gdm:"))
 async def groupdm_pick_cb(client: Client, cq):
-    if cq.from_user.id != ADMIN_ID:
+    if cq.from_user.id not in ADMIN_IDS:
         await cq.answer()
         return
 
@@ -592,7 +608,7 @@ async def groupdm_pick_cb(client: Client, cq):
 @app.on_message(filters.private, group=5)
 async def groupdm_content_handler(client: Client, message: Message):
     """Capture admin's content message after groupdm target is set."""
-    if not message.from_user or message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id not in ADMIN_IDS:
         return
 
     session = _groupdm_sessions.get(ADMIN_ID)
@@ -681,7 +697,7 @@ async def groupdm_content_handler(client: Client, message: Message):
 
 @app.on_message(filters.command("groupstats") & filters.private, group=-3)
 async def groupstats_cmd(client: Client, message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
 
     await message.reply_text("📊 Fetching group stats…", parse_mode=HTML)

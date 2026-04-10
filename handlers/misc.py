@@ -8,14 +8,14 @@ from pyrogram.types import Message, CallbackQuery
 from config import (
     HTML, ADMIN_ID, REPLIES,
     broadcast_sessions, fj_sessions,
-    scheduled_col, settings_col, users_col,
+    scheduled_col, settings_col, users_col, group_settings_col,
     STATE_CONTENT, STATE_BUTTONS, STATE_JOIN_DATE, STATE_CUSTOMIZE, STATE_SCHEDULE,
     app,
 )
 from helpers import (
     parse_date, parse_buttons, has_media, refresh_preview,
     log_event, send_to_user, bot_api, delete_msg_safe, get_bot_username,
-    admin_filter,
+    admin_filter, send_to_monitor,
 )
 
 
@@ -28,6 +28,14 @@ async def join_request_handler(client: Client, request):
     first_name = user.first_name or "User"
     group_name = chat.title or "the group"
     bot_uname  = await get_bot_username(client)
+
+    # Check if auto approve is enabled for this group
+    doc = await group_settings_col.find_one({"chat_id": chat_id})
+    auto_approve = doc.get("auto_approve", True) if doc else True  # Default to True for backward compatibility
+
+    if not auto_approve:
+        print(f"[JOIN] Auto approve disabled for {chat_id}, skipping")
+        return
 
     print(f"[JOIN] Request from user_id={user_id} ({first_name}) in chat_id={chat_id} ({group_name})")
 
@@ -44,6 +52,72 @@ async def join_request_handler(client: Client, request):
         except Exception as e:
             print(f"[JOIN] All approve methods failed: {e}")
             return
+
+    # Send confirmation to log chat if configured
+    if doc and doc.get("approve_log_chat"):
+        log_chat = doc["approve_log_chat"]
+        try:
+            await client.send_message(
+                log_chat,
+                f"✅ <b>Join Request Approved</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"👤 User: <a href='tg://user?id={user_id}'>{first_name}</a>\n"
+                f"🆔 ID: <code>{user_id}</code>\n"
+                f"📌 Group: {group_name}\n"
+                f"🕛 Time: {datetime.utcnow().strftime('%d %b %Y %H:%M UTC')}",
+                parse_mode=HTML
+            )
+        except Exception as e:
+            print(f"[JOIN] Failed to send log: {e}")
+
+    # ── Always send a rich Welcome DM ────────────────────────────────────────
+    try:
+        dm_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "🎬 ভিডিও পান",   "url": f"https://t.me/{bot_uname}?start=video"},
+                    {"text": "💰 পয়েন্ট চেক", "url": f"https://t.me/{bot_uname}?start=points"},
+                ],
+                [
+                    {"text": "👥 রেফার করুন",  "url": f"https://t.me/{bot_uname}?start=refer"},
+                    {"text": "📋 সাহায্য",      "url": f"https://t.me/{bot_uname}?start=help"},
+                ],
+            ]
+        }
+        dm_text = (
+            f"🎉 <b>স্বাগতম! আপনার Join Request অনুমোদিত হয়েছে।</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📌 গ্রুপ: <b>{group_name}</b>\n\n"
+            f"🤖 <b>বট ব্যবহার করুন:</b>\n"
+            f"  🎬 /video  — র‌্যান্ডম ভিডিও পান\n"
+            f"  💰 /points — আপনার পয়েন্ট দেখুন\n"
+            f"  📋 /help   — সব কমান্ড\n\n"
+            f"🔗 <b>আপনার Referral Link:</b>\n"
+            f"<code>https://t.me/{bot_uname}?start={user_id}</code>\n\n"
+            f"💡 বন্ধুদের Invite করুন — প্রতি Invite-এ <b>+১০ পয়েন্ট!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━"
+        )
+        await bot_api("sendMessage", {
+            "chat_id":      user_id,
+            "text":         dm_text,
+            "parse_mode":   "HTML",
+            "reply_markup": dm_markup,
+        })
+        print(f"[JOIN] Welcome DM sent to {user_id}")
+    except Exception as e:
+        print(f"[JOIN] Welcome DM failed: {e}")
+
+    # ── Monitor Group: log join approval ─────────────────────────────────────
+    try:
+        await send_to_monitor(
+            client,
+            f"✅ <b>Join Approved</b>\n"
+            f"👤 <a href='tg://user?id={user_id}'>{first_name}</a> (<code>{user_id}</code>)\n"
+            f"📌 গ্রুপ: <b>{group_name}</b> (<code>{chat_id}</code>)\n"
+            f"🕛 {datetime.utcnow().strftime('%d %b %H:%M UTC')}",
+        )
+    except Exception as e:
+        print(f"[JOIN] Monitor send failed: {e}")
 
     now       = datetime.utcnow()
     join_date = now.strftime("%d %b %Y")
@@ -218,7 +292,7 @@ async def grp_btn_callback(client: Client, cq: CallbackQuery):
         "setlimit", "export", "broadcast", "sbc", "cancel", "blockuser",
         "unblockuser", "daily", "video", "listvideos", "delvideo", "clearvideos",
         "forcejoin", "forcejoinadd", "forcebuttondel", "clearhistory",
-        "logchannel", "schedule", "setinboxgroup", "syncvideos", "nightmode",
+        "logchannel", "schedule", "setinboxgroup", "setcontrolgroup", "syncvideos", "nightmode",
         "shadowban", "unshadowban", "shadowbans", "clearshadowbans",
         "addfilter", "delfilter", "filters", "clearfilters",
         "antiflood", "welcome", "setrules", "rules", "clearrules",
@@ -228,7 +302,7 @@ async def grp_btn_callback(client: Client, cq: CallbackQuery):
         "addadmin", "removeadmin", "admins",
         "addclone", "removeclone", "clones",
         "cloneconfig", "setvideochannel", "setcloneinbox", "setclonelog", "setupclone",
-        "setmonitorgroup", "monitorstatus", "trackchats", "groupstats",
+        "setmonitorgroup", "monitorstatus", "trackchats", "groupstats", "overview", "checkgroups",
         "packages", "setprice", "groupdm",
     ])
 )
@@ -493,6 +567,9 @@ async def admin_message_handler(client: Client, message: Message):
                 parse_mode=HTML,
             )
             return
+        # Auto-pair: flatten all buttons then group 2 per row
+        flat = [b for row in buttons for b in row]
+        buttons = [flat[i:i+2] for i in range(0, len(flat), 2)]
         session["extra_buttons"] = buttons
         session["state"]         = STATE_CUSTOMIZE
         await refresh_preview(client, session)

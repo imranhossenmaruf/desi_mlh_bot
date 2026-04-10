@@ -4,7 +4,7 @@ from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-from config import HTML, ADMIN_ID, admins_col, app
+from config import HTML, ADMIN_ID, ADMIN_IDS, admins_col, app
 from helpers import _auto_del, log_event, is_any_admin
 
 
@@ -14,7 +14,7 @@ async def _get_all_admins() -> list[dict]:
 
 # ─── /addadmin ────────────────────────────────────────────────────────────────
 
-@app.on_message(filters.command("addadmin") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("addadmin") & filters.user(ADMIN_IDS) & filters.private)
 async def addadmin_cmd(client: Client, message: Message):
     args = message.command[1:]
     if not args or not args[0].lstrip("@").isdigit():
@@ -29,7 +29,7 @@ async def addadmin_cmd(client: Client, message: Message):
     new_uid = int(args[0].lstrip("@"))
     label   = " ".join(args[1:]) if len(args) > 1 else f"Admin {new_uid}"
 
-    if new_uid == ADMIN_ID:
+    if new_uid in ADMIN_IDS:
         await message.reply_text("⚠️ That's already the super admin.", parse_mode=HTML)
         return
 
@@ -81,7 +81,7 @@ async def addadmin_cmd(client: Client, message: Message):
 
 # ─── /removeadmin ─────────────────────────────────────────────────────────────
 
-@app.on_message(filters.command("removeadmin") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("removeadmin") & filters.user(ADMIN_IDS) & filters.private)
 async def removeadmin_cmd(client: Client, message: Message):
     args = message.command[1:]
     if not args or not args[0].lstrip("@").isdigit():
@@ -122,7 +122,7 @@ async def removeadmin_cmd(client: Client, message: Message):
 
 # ─── /admins ─────────────────────────────────────────────────────────────────
 
-@app.on_message(filters.command("admins") & filters.user(ADMIN_ID) & filters.private)
+@app.on_message(filters.command("admins") & filters.user(ADMIN_IDS) & filters.private)
 async def admins_list_cmd(client: Client, message: Message):
     docs = await _get_all_admins()
 

@@ -8,7 +8,7 @@ from pyrogram import Client, enums, filters as _pf
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ChatPermissions
 
 from config import (
-    HTML, BOT_TOKEN, ADMIN_ID,
+    HTML, BOT_TOKEN, ADMIN_ID, ADMIN_IDS,
     users_col, settings_col, scheduled_col, groups_col,
     broadcast_sessions,
     STATE_CUSTOMIZE,
@@ -47,7 +47,7 @@ def get_cfg(key: str, fallback=None, client=None):
 
 async def is_any_admin(user_id: int) -> bool:
     """Main-bot admin check: super admin OR DB sub-admin."""
-    if user_id == ADMIN_ID:
+    if user_id in ADMIN_IDS:
         return True
     doc = await admins_col.find_one({"user_id": user_id, "active": True})
     return doc is not None
@@ -65,19 +65,19 @@ async def _admin_filter_func(flt, client, update) -> bool:
     # client attribute is the most reliable (set at clone build time)
     cfg = getattr(client, "_clone_config", None) or _clone_config_ctx.get()
     if cfg:
-        return uid == ADMIN_ID or uid == cfg.get("admin_id")
+        return uid in ADMIN_IDS or uid == cfg.get("admin_id")
     return await is_any_admin(uid)
 
 
 async def _clone_admin_only_func(flt, client, update) -> bool:
-    """True only when in clone context AND user is that clone's admin (or ADMIN_ID)."""
+    """True only when in clone context AND user is that clone's admin (or ADMIN_IDS)."""
     user = getattr(update, "from_user", None)
     if not user:
         return False
     cfg = getattr(client, "_clone_config", None) or _clone_config_ctx.get()
     if not cfg:
         return False
-    return user.id == ADMIN_ID or user.id == cfg.get("admin_id")
+    return user.id in ADMIN_IDS or user.id == cfg.get("admin_id")
 
 
 admin_filter       = _pf.create(_admin_filter_func,      name="AdminFilter")
@@ -104,7 +104,11 @@ async def get_log_channel(client=None) -> int | None:
         return clone_lg
     # Priority 3: global settings_col
     doc = await settings_col.find_one({"key": "log_channel"})
-    return doc.get("chat_id") if doc else None
+    if doc and doc.get("chat_id"):
+        return doc["chat_id"]
+    # Priority 4: LOG_CHANNEL from .env / config
+    from config import LOG_CHANNEL as _LC
+    return _LC if _LC else None
 
 
 async def log_event(client: Client, text: str):
@@ -124,6 +128,26 @@ async def log_event(client: Client, text: str):
                 })
     except Exception as e:
         print(f"[LOG_EVENT] Failed: {e}")
+
+
+async def send_to_monitor(client: Client, text: str, parse_mode: str = "HTML"):
+    """Send an activity event to the Monitor Group."""
+    try:
+        from handlers.control_group import get_monitor_group
+        mon = await get_monitor_group()
+        if not mon:
+            return
+        bot_token = getattr(client, "_bot_token", None) or _bot_token_ctx.get() or BOT_TOKEN
+        import aiohttp as _aiohttp
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        async with _aiohttp.ClientSession() as _sess:
+            await _sess.post(url, json={
+                "chat_id":    mon,
+                "text":       text,
+                "parse_mode": parse_mode,
+            })
+    except Exception as e:
+        print(f"[MONITOR] Failed: {e}")
 
 
 def get_rank(ref_count: int) -> str:
@@ -154,6 +178,25 @@ async def save_user(user) -> bool:
         "joined_at":     datetime.utcnow(),
     })
     return True
+
+
+async def get_custom_buttons(chat_id: int) -> InlineKeyboardMarkup | None:
+    """Get custom buttons configured for a group."""
+    from config import group_settings_col
+    doc = await group_settings_col.find_one({"chat_id": chat_id})
+    if not doc or not doc.get("custom_buttons"):
+        return None
+
+    buttons = doc["custom_buttons"]
+    if not buttons:
+        return None
+
+    # Create inline keyboard
+    keyboard = []
+    for btn in buttons:
+        keyboard.append([InlineKeyboardButton(btn["text"], url=btn["url"])])
+
+    return InlineKeyboardMarkup(keyboard)
 
 
 def parse_date(text: str):
@@ -386,26 +429,68 @@ async def refresh_preview(client: Client, session: dict):
     sent = None
     try:
         if msg_type == "text":
-            sent = await client.send_message(
-                chat_id=chat_id,
-                text=text or "(empty)",
-                entities=entities,
-                reply_markup=kb,
-            )
+            # Use Bot API to avoid Pyrogram PEER_ID_INVALID
+            kb_json = _kb_to_json(kb)
+            params: dict = {
+                "chat_id":    chat_id,
+                "text":       text or "(empty)",
+                "parse_mode": "HTML",
+            }
+            if kb_json:
+                params["reply_markup"] = kb_json
+            resp = await bot_api("sendMessage", params)
+            if resp.get("ok"):
+                sent = _FakeMsg(resp["result"]["message_id"])
+            else:
+                raise RuntimeError(resp.get("description", "sendMessage failed"))
         elif msg_type == "media":
-            sent = await _send_media(client, chat_id, session,
-                                     caption=text, caption_entities=entities, reply_markup=kb)
+            # Use file_id directly for preview (more reliable than copyMessage)
+            file_id    = session.get("file_id")
+            media_kind = session.get("media_kind", "photo")
+            _preview_method = {
+                "photo":      ("sendPhoto",      "photo"),
+                "video":      ("sendVideo",      "video"),
+                "animation":  ("sendAnimation",  "animation"),
+                "document":   ("sendDocument",   "document"),
+                "audio":      ("sendAudio",      "audio"),
+                "voice":      ("sendVoice",      "voice"),
+                "sticker":    ("sendSticker",    "sticker"),
+                "video_note": ("sendVideoNote",  "video_note"),
+            }
+            if file_id and media_kind in _preview_method:
+                api_method, field_name = _preview_method[media_kind]
+                _p: dict = {"chat_id": chat_id, field_name: file_id}
+                if text and media_kind not in ("sticker", "video_note"):
+                    _p["caption"]    = text
+                    _p["parse_mode"] = "HTML"
+                _kb = _kb_to_json(kb)
+                if _kb:
+                    _p["reply_markup"] = _kb
+                _r = await bot_api(api_method, _p)
+                if _r.get("ok"):
+                    sent = _FakeMsg(_r["result"]["message_id"])
+                    print(f"[refresh_preview] media preview sent via {api_method}")
+                else:
+                    raise RuntimeError(_r.get("description", f"{api_method} failed"))
+            else:
+                sent = await _send_media(client, chat_id, session,
+                                         caption=text, caption_entities=entities, reply_markup=kb)
     except Exception as e:
         print(f"[refresh_preview] error: {e}")
         try:
-            await client.send_message(
-                chat_id=chat_id,
-                text=f"⚠️ Preview failed: <code>{e}</code>\n\nTry sending the media again.",
-                parse_mode="html",
-                reply_markup=kb,
-            )
-        except Exception:
-            pass
+            kb_json = _kb_to_json(kb)
+            params_err: dict = {
+                "chat_id":    chat_id,
+                "text":       f"⚠️ Preview failed: <code>{e}</code>\n\nMidia আবার পাঠান।",
+                "parse_mode": "HTML",
+            }
+            if kb_json:
+                params_err["reply_markup"] = kb_json
+            r = await bot_api("sendMessage", params_err)
+            if r.get("ok"):
+                sent = _FakeMsg(r["result"]["message_id"])
+        except Exception as e2:
+            print(f"[refresh_preview] error fallback also failed: {e2}")
 
     if sent:
         session["preview_msg_id"] = sent.id
@@ -422,18 +507,20 @@ async def auto_delete(client: Client, chat_id: int, msg_id: int, delay: float = 
 async def send_to_user(client: Client, uid: int, session: dict, reply_markup=None):
     msg_type = session.get("msg_type")
     text     = session.get("text") or None
-    entities = session.get("entities") or None
 
     if msg_type == "text":
-        return await client.send_message(
-            chat_id=uid,
-            text=text,
-            entities=entities,
-            reply_markup=reply_markup,
-        )
+        # Use Bot API (HTTP) to avoid Pyrogram PEER_ID_INVALID for uncached users
+        kb_json = _kb_to_json(reply_markup)
+        params: dict = {"chat_id": uid, "text": text or "(empty)", "parse_mode": "HTML"}
+        if kb_json:
+            params["reply_markup"] = kb_json
+        resp = await bot_api("sendMessage", params)
+        if resp.get("ok"):
+            return _FakeMsg(resp["result"]["message_id"])
+        raise RuntimeError(f"sendMessage failed: {resp.get('description', 'unknown')}")
     elif msg_type == "media":
         return await _send_media(client, uid, session,
-                                 caption=text, caption_entities=entities, reply_markup=reply_markup)
+                                 caption=text, reply_markup=reply_markup)
     return None
 
 

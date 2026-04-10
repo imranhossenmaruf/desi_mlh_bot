@@ -8,7 +8,7 @@ from pyrogram.types import (
 )
 
 from config import (
-    HTML, ADMIN_ID, PACKAGES, PACKAGE_ORDER, PAYMENT_METHODS,
+    HTML, ADMIN_ID, ADMIN_IDS, PACKAGES, PACKAGE_ORDER, PAYMENT_METHODS,
     app, users_col, premium_col, proof_sessions,
 )
 from helpers import log_event, bot_api
@@ -167,7 +167,7 @@ async def mypremium_cmd(_, message: Message):
 
 @app.on_message(filters.private & filters.command("premiumlist"))
 async def premiumlist_cmd(_, message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
     now  = datetime.now(timezone.utc)
     docs = await premium_col.find({"expires_at": {"$gt": now}}).to_list(length=200)
@@ -190,7 +190,7 @@ async def premiumlist_cmd(_, message: Message):
 
 @app.on_message(filters.private & filters.command("revokepremium"))
 async def revokepremium_cmd(_, message: Message):
-    if message.from_user.id != ADMIN_ID:
+    if message.from_user.id not in ADMIN_IDS:
         return
     parts = message.text.split()
     if len(parts) < 2:
@@ -501,7 +501,7 @@ async def proof_photo_handler(_, message: Message):
     filters.regex(r"^prem_approve_(\d+)_(starter|basic|standard|pro|vip|elite)$")
 )
 async def prem_approve(_, cq: CallbackQuery):
-    if cq.from_user.id != ADMIN_ID:
+    if cq.from_user.id not in ADMIN_IDS:
         await cq.answer("⛔ Admin only.", show_alert=True)
         return
 
@@ -569,7 +569,7 @@ async def prem_approve(_, cq: CallbackQuery):
 
 @app.on_callback_query(filters.regex(r"^prem_reject_(\d+)$"))
 async def prem_reject(_, cq: CallbackQuery):
-    if cq.from_user.id != ADMIN_ID:
+    if cq.from_user.id not in ADMIN_IDS:
         await cq.answer("⛔ Admin only.", show_alert=True)
         return
 

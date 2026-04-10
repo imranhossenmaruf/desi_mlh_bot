@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from dotenv import load_dotenv # যুক্ত করা হয়েছে
+from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pyrogram import Client, enums
 
@@ -9,39 +9,49 @@ load_dotenv()
 
 HTML = enums.ParseMode.HTML
 
-# এনভায়রনমেন্ট ভেরিয়েবল থেকে ডেটা নেওয়া
+# এনভায়রনমেন্ট ভেরিয়েবল থেকে ডেটা নেওয়া
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 MONGO_URI = os.environ["MONGO_URI"]
-ADMIN_ID = int(os.environ["ADMIN_ID"])
-API_ID = int(os.environ["TELEGRAM_API_ID"])
-API_HASH = os.environ["TELEGRAM_API_HASH"]
+_raw_ids      = os.environ.get("ADMIN_IDS", os.environ.get("ADMIN_ID", ""))
+ADMIN_IDS     = [int(x.strip()) for x in _raw_ids.split(",") if x.strip()]
+ADMIN_ID      = ADMIN_IDS[0]          # primary admin (backward-compat)
+API_ID        = int(os.environ["TELEGRAM_API_ID"])
+API_HASH      = os.environ["TELEGRAM_API_HASH"]
 VIDEO_CHANNEL = int(os.environ.get("VIDEO_CHANNEL", -1002623940581))
+LOG_CHANNEL   = int(os.environ.get("LOG_CHANNEL", 0))
 
-mongo_client   = AsyncIOMotorClient(
-    MONGO_URI, # ভেরিয়েবল দিয়ে রিপ্লেস করা হয়েছে
+mongo_client = AsyncIOMotorClient(
+    MONGO_URI,
     serverSelectionTimeoutMS=8000,
     connectTimeoutMS=8000,
     socketTimeoutMS=10000,
 )
-db             = mongo_client["telegram_bot"]
-users_col      = db["users"]
-videos_col     = db["channel_videos"]
-vid_hist_col   = db["user_video_history"]
-settings_col   = db["bot_settings"]
-scheduled_col  = db["scheduled_broadcasts"]
-nightmode_col  = db["nightmode_settings"]
-shadowban_col  = db["shadowban"]
-filters_col    = db["group_filters"]
-antiflood_col  = db["antiflood_settings"]
-welcome_col    = db["welcome_messages"]
-rules_col      = db["group_rules"]
-premium_col    = db["premium_users"]
-inbox_col           = db["inbox_messages"]
-conversations_col   = db["inbox_conversations"]
-groups_col          = db["bot_groups"]
-del_queue_col       = db["video_del_queue"]
-admins_col          = db["bot_admins"]
-clones_col          = db["bot_clones"]
+db                    = mongo_client["telegram_bot"]
+users_col             = db["users"]
+videos_col            = db["channel_videos"]
+vid_hist_col          = db["user_video_history"]
+settings_col          = db["bot_settings"]
+scheduled_col         = db["scheduled_broadcasts"]
+nightmode_col         = db["nightmode_settings"]
+shadowban_col         = db["shadowban"]
+filters_col           = db["group_filters"]
+antiflood_col         = db["antiflood_settings"]
+welcome_col           = db["welcome_messages"]
+rules_col             = db["group_rules"]
+premium_col           = db["premium_users"]
+inbox_col             = db["inbox_messages"]
+conversations_col     = db["inbox_conversations"]
+groups_col            = db["bot_groups"]
+del_queue_col         = db["video_del_queue"]
+admins_col            = db["bot_admins"]
+clones_col            = db["bot_clones"]
+group_settings_col    = db["group_settings"]
+auto_reactions_col    = db["auto_reactions"]
+keyword_triggers_col  = db["keyword_triggers"]
+group_buttons_col     = db["group_buttons"]
+auto_approve_logs_col = db["auto_approve_logs"]
+join_requests_col     = db["join_requests"]
+tagger_logs_col       = db["tagger_logs"]
 
 # কনস্ট্যান্ট সেটআপ
 DAILY_VIDEO_LIMIT = 5
@@ -121,7 +131,7 @@ PACKAGES = {
 PACKAGE_ORDER = ["starter", "basic", "standard", "pro", "vip", "elite"]
 
 PAYMENT_METHODS = {
-    "binance":  {
+    "binance": {
         "label": "💛 Binance Pay",
         "type":  "qr",
         "qr":    "assets/binance_qr.png",
@@ -149,11 +159,11 @@ PAYMENT_METHODS = {
     },
 }
 
-broadcast_sessions:   dict[int, dict]       = {}
-fj_sessions:          dict[int, dict]       = {}
-flood_tracker:        dict[tuple, list]     = {}
+broadcast_sessions:   dict[int, dict]           = {}
+fj_sessions:          dict[int, dict]           = {}
+flood_tracker:        dict[tuple, list]         = {}
 pending_welcome_msgs: dict[int, tuple[int, int]] = {}
-proof_sessions:       dict[int, dict]       = {}
+proof_sessions:       dict[int, dict]           = {}
 
 STATE_AUDIENCE  = "audience"
 STATE_JOIN_DATE = "join_date"

@@ -8,7 +8,7 @@ from pyrogram import Client, filters, StopPropagation
 from pyrogram.types import Message
 
 from config import (
-    HTML, ADMIN_ID, DAILY_VIDEO_LIMIT,
+    HTML, ADMIN_ID, ADMIN_IDS, DAILY_VIDEO_LIMIT,
     settings_col, inbox_col, conversations_col,
     users_col, premium_col, app,
 )
@@ -192,7 +192,7 @@ async def set_inbox_group_cmd(client: Client, message: Message):
 @app.on_message(filters.private & filters.incoming, group=10)
 async def user_msg_to_inbox(client: Client, message: Message):
     user = message.from_user
-    if not user or user.id == ADMIN_ID:
+    if not user or user.id in ADMIN_IDS:
         return
     # Skip clone admins (they use commands, not inbox)
     cfg = getattr(client, "_clone_config", None)
