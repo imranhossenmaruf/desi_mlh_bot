@@ -1,7 +1,4 @@
 python-dotenv
-python-telegram-bot==20.7
-flask
-requests
 pyrogram
 tgcrypto
 motor
