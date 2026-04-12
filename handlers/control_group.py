@@ -353,7 +353,7 @@ async def set_monitor_group_dm(client: Client, message: Message):
     )
 
 
-# ── /syscheck ─────────────────────────────────────────────────────────────────────
+# ── /syscheck ────────────────────────────────────────────────────────────��────────
 
 @app.on_message(filters.command("syscheck") & filters.group, group=1)
 async def syscheck_cmd(client: Client, message: Message):
@@ -427,8 +427,13 @@ CTRL_HELP_TEXT = (
     "  /kw clear                            — সব keyword মুছুন\n\n"
     "📥 <b>Inbox Group:</b>\n"
     "  /setinboxgroup [chat_id]             — Inbox Group সেট করুন\n\n"
-    "📡 <b>Monitor & System:</b>\n"
+    "📡 <b>Monitor & Tracking:</b>\n"
     "  /setmonitorgroup [chat_id]           — Monitor Group সেট করুন\n"
+    "  /trackchats_on                       — এই গ্রুপে tracking চালু\n"
+    "  /trackchats_off                      — এই গ্রুপে tracking বন্ধ\n"
+    "  /trackall_on                         — সব গ্রুপে global tracking চালু\n"
+    "  /trackall_off                        — global tracking বন্ধ\n"
+    "  /trackstatus                         — এই গ্রুপের tracking status\n"
     "  /syscheck                            — সম্পূর্ণ system health check\n\n"
     "📊 <b>Statistics:</b>\n"
     "  /overview                            — শেষ ৭ দিনের summary\n"
@@ -1488,7 +1493,7 @@ async def overview_dm_cmd(client: Client, message: Message):
         await message.reply_text(f"❌ Error: <code>{e}</code>", parse_mode=HTML)
 
 
-# ── /videoon & /videooff ──────────────────────────────────────────────────────────
+# ── /videoon & /videooff ──────────────────────────��───────────────────────────────
 
 @app.on_message(filters.command(["videoon", "videooff"]) & filters.group, group=1)
 async def ctrl_video_toggle_cmd(client: Client, message: Message):
@@ -1811,7 +1816,7 @@ async def ctrl_warn_toggle_cmd(client: Client, message: Message):
         await message.reply_text(
             f"⚠️ <b>ব্যবহার:</b> <code>/{cmd} -100xxxxxxxxxx</code>\n\n"
             f"<code>/warnon</code>  — ডিলিট হলে Warning পাঠাবে ✅\n"
-            f"<code>/warnoff</code> — চুপচাপ ডিলিট করবে, Warning দেবে না ❌",
+            f"<code>/warnoff</code> — চুপচাপ ডিল��ট করবে, Warning দেবে না ❌",
             parse_mode=HTML,
         )
         return
@@ -2069,7 +2074,7 @@ async def ctrl_tagall_cb(client: Client, cq: CallbackQuery):
 # group=11 handler removed — tagall button session merged into _ctrl_session_handler (group=10)
 
 
-# ── /setinboxgroup — Control Group থেকে Inbox Group সেট করা ─────────────────────
+# ── /setinboxgroup — Control Group থেকে Inbox Group সেট করা ──��──────────────────
 
 @app.on_message(filters.command("setinboxgroup") & filters.group, group=1)
 async def ctrl_set_inbox_group_cmd(client: Client, message: Message):

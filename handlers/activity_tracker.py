@@ -23,13 +23,12 @@ from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from config import app, HTML, settings_col, clones_col, groups_col, ADMIN_ID, ADMIN_IDS
+from config import app, HTML, settings_col, clones_col, groups_col, ADMIN_ID, ADMIN_IDS, monitor_settings_col
 from helpers import _is_admin_msg, _auto_del, get_cfg, _clone_config_ctx
 
 
 # ── MongoDB collections ────────────────────────────────────────────────────────
 _monitor_col   = None   # chat_monitor_msgs — header/copied IDs → user_id
-_tracking_col  = None   # chat_monitor_settings — per-group enabled flag
 
 # ── Forward dedup — prevents both main+clone bot forwarding the same message ──
 # Key = (chat_id, msg_id), value = float timestamp. Cleaned every 60 s.
@@ -53,11 +52,8 @@ def _mon_col():
 
 
 def _trk_col():
-    global _tracking_col
-    if _tracking_col is None:
-        from config import db
-        _tracking_col = db["chat_monitor_settings"]
-    return _tracking_col
+    """Return the monitor settings collection (shared with handlers/monitor.py)."""
+    return monitor_settings_col
 
 
 # In-memory cache {chat_id: bool}

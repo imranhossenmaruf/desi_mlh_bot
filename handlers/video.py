@@ -11,7 +11,7 @@ from config import (
     group_settings_col,
     app,
 )
-from helpers import get_bot_username, log_event, bot_api, _bot_token_ctx, BOT_TOKEN, get_cfg, admin_filter, _clone_config_ctx
+from helpers import get_bot_username, log_event, bot_api, _bot_token_ctx, BOT_TOKEN, get_cfg, admin_filter, _clone_config_ctx, _auto_del
 
 
 # ── Channel promotional button ────────────────────────────────────────────────
@@ -335,7 +335,7 @@ async def video_handler_private(client: Client, message: Message):
             "1️⃣ Join each channel using the buttons\n"
             "2️⃣ Tap ✅ to verify and get your video\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🤖 DESI MLH SYSTEM",
+            "���� DESI MLH SYSTEM",
             reply_markup=InlineKeyboardMarkup(_fj_join_buttons(not_joined)),
         )
         return
@@ -412,6 +412,73 @@ async def video_handler_group(client: Client, message: Message):
             except Exception:
                 pass
         asyncio.create_task(_del_ok())
+
+
+# ── Text trigger "video" (without command) ────────────────────────────────────────
+@app.on_message(filters.group & filters.text & filters.incoming)
+async def video_text_trigger(client: Client, message: Message):
+    """Handle when user types just 'video' (case insensitive) in group."""
+    text = (message.text or "").strip().lower()
+    if text != "video":
+        return
+    
+    user = message.from_user
+    if not user:
+        return
+    user_id = user.id
+    fname = user.first_name or "User"
+    mention = f'<a href="tg://user?id={user_id}">{fname}</a>'
+
+    # Check group video setting
+    grp_cfg = await group_settings_col.find_one({"chat_id": message.chat.id}) or {}
+    features = grp_cfg.get("features", {})
+    video_on = features.get("video", True)
+
+    if not video_on:
+        # Video is OFF - reply with message
+        m = await message.reply_text(
+            f"\u274C <b>Video feature is OFF</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"{mention}, video responses are disabled in this group.\n"
+            f"Contact the admin to enable it.",
+            parse_mode=HTML,
+        )
+        asyncio.create_task(_auto_del(m, 30))
+        return
+
+    # Video is ON - send video to user's DM
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    try:
+        err = await _send_video_to_user(client, user_id)
+    except Exception as exc:
+        err = f"Please start the bot in DM first, then try again."
+        print(f"[VIDEO_TEXT] _send_video_to_user failed for {user_id}: {exc}")
+
+    if err:
+        bot_uname = await get_bot_username(client)
+        btn = InlineKeyboardMarkup([[
+            InlineKeyboardButton("\U0001F3AC Get My Video Now", url=f"https://t.me/{bot_uname}?start=video"),
+        ]])
+        grp_msg = await message.reply_text(
+            f"\U0001F44B Hey {mention}!\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"\u26A0\uFE0F <b>{err}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"\U0001F447 Tap below to get it in DM:",
+            reply_markup=btn,
+            parse_mode=HTML,
+        )
+        asyncio.create_task(_auto_del(grp_msg, 60))
+    else:
+        notify = await message.reply_text(
+            f"\U0001F3AC {mention}, video sent to your DM! \u2705",
+            parse_mode=HTML,
+        )
+        asyncio.create_task(_auto_del(notify, 30))
 
 
 @app.on_message(filters.channel)

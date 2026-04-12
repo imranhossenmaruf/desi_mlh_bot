@@ -52,6 +52,14 @@ group_buttons_col     = db["group_buttons"]
 auto_approve_logs_col = db["auto_approve_logs"]
 join_requests_col     = db["join_requests"]
 tagger_logs_col       = db["tagger_logs"]
+monitor_settings_col  = db["monitor_settings"]       # global/per-group tracking settings
+monitor_last_msg_col  = db["monitor_last_messages"]  # smart edit: last msg per (chat_id, user_id)
+
+# ── Ignored Groups (tracking will be skipped for these) ────────────────────────
+# Format: list of chat_ids (integers)
+IGNORED_GROUPS: list[int] = [
+    int(x.strip()) for x in os.environ.get("IGNORED_GROUPS", "").split(",") if x.strip()
+]
 
 # কনস্ট্যান্ট সেটআপ
 DAILY_VIDEO_LIMIT = 5
