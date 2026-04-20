@@ -5,7 +5,8 @@
  * Telegram Bot Dashboard API
  * OpenAPI spec version: 0.1.0
  */
+import type { BotFileMeta } from "./botFileMeta";
 
-export interface HealthStatus {
-  status: string;
+export interface BotFileList {
+  files: BotFileMeta[];
 }

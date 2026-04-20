@@ -1,22 +1,24 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Telegram Bot Dashboard API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: github
+    description: GitHub repository sync operations
+  - name: bot
+    description: Bot configuration and status
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +26,170 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /github/connect:
+    post:
+      operationId: connectGitHub
+      tags: [github]
+      summary: Connect to a GitHub repository
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubConnectBody"
+      responses:
+        "200":
+          description: Connection successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubConnectResult"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /github/status:
+    get:
+      operationId: getGitHubStatus
+      tags: [github]
+      summary: Get current GitHub connection and sync status
+      responses:
+        "200":
+          description: Status info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubStatus"
+
+  /github/sync:
+    post:
+      operationId: syncFromGitHub
+      tags: [github]
+      summary: Pull latest code from GitHub repository
+      responses:
+        "200":
+          description: Sync result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncResult"
+        "400":
+          description: Not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /github/push:
+    post:
+      operationId: pushToGitHub
+      tags: [github]
+      summary: Push local bot code changes back to GitHub
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushBody"
+      responses:
+        "200":
+          description: Push result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncResult"
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /github/files:
+    get:
+      operationId: getBotFiles
+      tags: [github]
+      summary: List bot Python source files
+      responses:
+        "200":
+          description: File list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotFileList"
+
+  /github/file:
+    get:
+      operationId: getBotFileContent
+      tags: [github]
+      summary: Get contents of a specific bot file
+      parameters:
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotFileContent"
+        "404":
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /bot/config:
+    get:
+      operationId: getBotConfig
+      tags: [bot]
+      summary: Get current bot configuration (tokens masked)
+      responses:
+        "200":
+          description: Bot config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConfig"
+    post:
+      operationId: saveBotConfig
+      tags: [bot]
+      summary: Save bot configuration (Telegram token, MongoDB URI)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotConfigBody"
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConfig"
+
+  /bot/logs:
+    get:
+      operationId: getBotLogs
+      tags: [bot]
+      summary: Get recent bot activity log lines
+      responses:
+        "200":
+          description: Log lines
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotLogs"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +200,167 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    GitHubConnectBody:
+      type: object
+      properties:
+        repoUrl:
+          type: string
+          description: GitHub repository HTTPS URL
+        token:
+          type: string
+          description: GitHub Personal Access Token
+        branch:
+          type: string
+          description: Branch to sync (defaults to main)
+      required:
+        - repoUrl
+        - token
+
+    GitHubConnectResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        repoName:
+          type: string
+        branch:
+          type: string
+      required:
+        - success
+        - message
+
+    GitHubStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        repoUrl:
+          type: string
+        repoName:
+          type: string
+        branch:
+          type: string
+        lastSync:
+          type: string
+          nullable: true
+        lastPush:
+          type: string
+          nullable: true
+        localPath:
+          type: string
+          nullable: true
+      required:
+        - connected
+
+    SyncResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        filesChanged:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+      required:
+        - success
+        - message
+
+    PushBody:
+      type: object
+      properties:
+        commitMessage:
+          type: string
+      required:
+        - commitMessage
+
+    BotFileList:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/BotFileMeta"
+      required:
+        - files
+
+    BotFileMeta:
+      type: object
+      properties:
+        path:
+          type: string
+        name:
+          type: string
+        size:
+          type: number
+        lastModified:
+          type: string
+      required:
+        - path
+        - name
+        - size
+        - lastModified
+
+    BotFileContent:
+      type: object
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+      required:
+        - path
+        - content
+
+    BotConfig:
+      type: object
+      properties:
+        hasTelegramToken:
+          type: boolean
+        hasMongoUri:
+          type: boolean
+        hasGitHubToken:
+          type: boolean
+        repoUrl:
+          type: string
+          nullable: true
+      required:
+        - hasTelegramToken
+        - hasMongoUri
+        - hasGitHubToken
+
+    BotConfigBody:
+      type: object
+      properties:
+        telegramToken:
+          type: string
+          nullable: true
+        mongoUri:
+          type: string
+          nullable: true
+
+    BotLogs:
+      type: object
+      properties:
+        lines:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+      required:
+        - lines
+        - timestamp
