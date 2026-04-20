@@ -1,17 +1,13 @@
 """
-Group Protection System — Control Group থেকে পরিচালনা
-───────────────────────────────────────────────────────
-১. Anti-Forward    — Forward মেসেজ DELETE + warning (warning-ও delete হবে)
-২. Link Protection — লিঙ্ক মেসেজ DELETE + rolling warning
-                     পরের warning আসলে আগেরটা auto-delete
-৩. Anti-Spam       — configurable threshold, mute 5 মিনিট
+Group Protection System — TOS Compliant
+- Anti-Forward: Delete forwarded messages from non-admins
+- Link Protection: Delete links from non-admins, rolling warning
+- Anti-Spam: configurable threshold, mute 5 minutes
 
-Control Group Commands:
-  /protect [gid] forward on|off
-  /protect [gid] links   on|off
-  /protect [gid] spam    on|off
-  /protect [gid] spam_limit 5
-  /protections            — সব গ্রুপ দেখুন
+SECURITY RULES:
+- Group Admins are always EXEMPT from all protections.
+- Bot Owner (@IH_Maruf / BOT_OWNER_USERNAME) is always EXEMPT.
+- Only visible, real moderator actions — no invisible tricks.
 """
 
 import asyncio
@@ -23,28 +19,23 @@ from datetime import datetime, timedelta
 from pyrogram import Client, filters
 from pyrogram.types import Message, ChatPermissions
 
-from config import HTML, ADMIN_ID, BOT_OWNER_USERNAME, db, app
+from config import HTML, ADMIN_ID, BOT_OWNER_USERNAME, db, app, ADMIN_IDS
 from helpers import _auto_del, is_any_admin, _is_admin_msg, send_to_monitor
 
 
-# ── DB ─────────────────────────────────────────────────────────────────────────
 _prot_col = db["group_protections"]
 
-# ── URL Regex ──────────────────────────────────────────────────────────────────
 _URL_RE = re.compile(
     r"(https?://|t\.me/|www\.|bit\.ly|tinyurl\.com|telegram\.me|telegram\.org|"
     r"youtu\.be|@\w{5,})",
     re.IGNORECASE,
 )
 
-# ── Caches ─────────────────────────────────────────────────────────────────────
-_prot_cache: dict[int, dict]    = {}
-_last_warn:  dict[tuple, int]   = {}          # (chat_id, uid, kind) → msg_id
+_prot_cache: dict[int, dict] = {}
+_last_warn: dict[tuple, int] = {}
 _spam_track: dict[tuple, deque] = defaultdict(lambda: deque(maxlen=60))
-_muted_at:   dict[tuple, float] = {}
+_muted_at: dict[tuple, float] = {}
 
-
-# ── DB helpers ─────────────────────────────────────────────────────────────────
 
 async def _get_prot(chat_id: int) -> dict:
     if chat_id in _prot_cache:
@@ -64,13 +55,42 @@ async def _save_prot(chat_id: int, key: str, value):
     )
 
 
-# ── /protect ───────────────────────────────────────────────────────────────────
+async def _is_exempt(client: Client, message: Message) -> bool:
+    """
+    Returns True if the user is exempt from protections:
+    - Group admin or creator
+    - Bot owner (@IH_Maruf)
+    - Global admin in ADMIN_IDS
+    """
+    if not message.from_user:
+        return False
+
+    uid = message.from_user.id
+
+    # Always exempt global admins and bot owner
+    if uid in ADMIN_IDS:
+        return True
+
+    username = (message.from_user.username or "").lower()
+    if username == BOT_OWNER_USERNAME.lower().lstrip("@"):
+        return True
+
+    # Check group admin status
+    try:
+        member = await client.get_chat_member(message.chat.id, uid)
+        if member.status.name in ("ADMINISTRATOR", "OWNER"):
+            return True
+    except Exception:
+        pass
+
+    return False
+
 
 @app.on_message(filters.command("protect") & filters.group, group=1)
 async def protect_cmd(client: Client, message: Message):
     from handlers.control_group import is_control_group
 
-    uid     = message.from_user.id if message.from_user else 0
+    uid = message.from_user.id if message.from_user else 0
     is_ctrl = await is_control_group(message.chat.id)
 
     if not is_ctrl and not await _is_admin_msg(client, message):
@@ -82,324 +102,169 @@ async def protect_cmd(client: Client, message: Message):
 
     KEY_MAP = {
         "forward": "anti_forward",
-        "links":   "link_protection",
-        "spam":    "anti_spam",
+        "links": "link_protection",
+        "spam": "anti_spam",
     }
 
-    # ── Group-internal: /protect forward on ───────────────────────────────────
     if not is_ctrl:
         if len(args) < 2:
             m = await message.reply_text(
-                "📋 <b>Protection সেট করুন:</b>\n"
-                "<code>/protect forward on|off</code>\n"
-                "<code>/protect links on|off</code>\n"
-                "<code>/protect spam on|off</code>\n"
-                "<code>/protect spam_limit 5</code>",
+                "<b>Protection Settings:</b>\n"
+                "/protect forward on|off\n"
+                "/protect links on|off\n"
+                "/protect spam on|off\n"
+                "/protect spam_limit 5",
                 parse_mode=HTML,
             )
             asyncio.create_task(_auto_del(m, 20))
             return
 
-        ptype = args[0].lower()
-        val   = args[1].lower()
-        cid   = message.chat.id
+        key_raw = args[0].lower()
+        val_raw = args[1].lower() if len(args) > 1 else ""
 
-        if ptype == "spam_limit":
+        if key_raw == "spam_limit":
             try:
-                n = int(val)
-                await _save_prot(cid, "spam_limit", n)
-                m = await message.reply_text(
-                    f"✅ Spam limit: <b>{n} মেসেজ/১০ সেকেন্ড</b>", parse_mode=HTML
-                )
+                limit = int(val_raw)
+                await _save_prot(message.chat.id, "spam_limit", limit)
+                m = await message.reply_text(f"Spam limit set to {limit} messages.", parse_mode=HTML)
+                asyncio.create_task(_auto_del(m, 15))
             except ValueError:
-                m = await message.reply_text("❌ সংখ্যা দিন।", parse_mode=HTML)
+                m = await message.reply_text("Usage: /protect spam_limit [number]", parse_mode=HTML)
+                asyncio.create_task(_auto_del(m, 15))
+            return
+
+        db_key = KEY_MAP.get(key_raw)
+        if not db_key:
+            m = await message.reply_text("Unknown setting. Use: forward | links | spam", parse_mode=HTML)
             asyncio.create_task(_auto_del(m, 15))
             return
 
-        if ptype not in KEY_MAP:
-            m = await message.reply_text(
-                "❌ ধরন: <code>forward</code> / <code>links</code> / <code>spam</code>",
-                parse_mode=HTML,
-            )
-            asyncio.create_task(_auto_del(m, 15))
+        enabled = val_raw == "on"
+        await _save_prot(message.chat.id, db_key, enabled)
+        status = "enabled" if enabled else "disabled"
+        m = await message.reply_text(f"{key_raw.title()} protection {status}.", parse_mode=HTML)
+        asyncio.create_task(_auto_del(m, 15))
+        return
+
+
+# ── Enforcement: Anti-Forward ──────────────────────────────────────────────────
+
+@app.on_message(filters.group & filters.forwarded & filters.incoming, group=10)
+async def enforce_anti_forward(client: Client, message: Message):
+    try:
+        cfg = await _get_prot(message.chat.id)
+        if not cfg.get("anti_forward"):
             return
 
-        enabled = val in ("on", "true", "1")
-        await _save_prot(cid, KEY_MAP[ptype], enabled)
-        icon = "✅" if enabled else "❌"
-        m = await message.reply_text(
-            f"{icon} <b>{ptype.title()} Protection</b> {'চালু' if enabled else 'বন্ধ'} করা হয়েছে।",
-            parse_mode=HTML,
-        )
-        asyncio.create_task(_auto_del(m, 15))
-        try:
-            await message.delete()
-        except Exception:
-            pass
-        return
+        if await _is_exempt(client, message):
+            return
 
-    # ── Control Group: /protect [gid] forward on ──────────────────────────────
-    if len(args) < 3:
-        m = await message.reply_text(
-            "📋 <b>Control Group থেকে:</b>\n"
-            "<code>/protect [group_id] forward on|off</code>\n"
-            "<code>/protect [group_id] links on|off</code>\n"
-            "<code>/protect [group_id] spam on|off</code>\n"
-            "<code>/protect [group_id] spam_limit 5</code>",
-            parse_mode=HTML,
-        )
-        asyncio.create_task(_auto_del(m, 25))
-        return
-
-    raw_gid = args[0]
-    if not raw_gid.lstrip("-").isdigit():
-        m = await message.reply_text("❌ সঠিক group ID দিন।", parse_mode=HTML)
-        asyncio.create_task(_auto_del(m, 15))
-        return
-
-    cid   = int(raw_gid)
-    ptype = args[1].lower()
-    val   = args[2].lower()
-
-    try:
-        chat  = await client.get_chat(cid)
-        title = chat.title or str(cid)
-    except Exception:
-        title = str(cid)
-
-    if ptype == "spam_limit":
-        try:
-            n = int(val)
-            await _save_prot(cid, "spam_limit", n)
-            m = await message.reply_text(
-                f"✅ <b>{title}</b>\nSpam limit: <b>{n} msgs/10s</b>", parse_mode=HTML
-            )
-        except ValueError:
-            m = await message.reply_text("❌ সংখ্যা দিন।", parse_mode=HTML)
-        asyncio.create_task(_auto_del(m, 15))
-        return
-
-    if ptype not in KEY_MAP:
-        m = await message.reply_text(
-            "❌ ধরন: <code>forward</code> / <code>links</code> / <code>spam</code>",
-            parse_mode=HTML,
-        )
-        asyncio.create_task(_auto_del(m, 15))
-        return
-
-    enabled = val in ("on", "true", "1")
-    await _save_prot(cid, KEY_MAP[ptype], enabled)
-    icon = "✅" if enabled else "❌"
-    m = await message.reply_text(
-        f"{icon} <b>{ptype.title()} Protection</b>\n"
-        f"📍 <b>{title}</b> — {'চালু' if enabled else 'বন্ধ'}",
-        parse_mode=HTML,
-    )
-    asyncio.create_task(_auto_del(m, 20))
-    try:
         await message.delete()
-    except Exception:
-        pass
 
-
-# ── /protections ───────────────────────────────────────────────────────────────
-
-@app.on_message(filters.command("protections") & filters.group, group=1)
-async def protections_cmd(client: Client, message: Message):
-    from handlers.control_group import is_control_group
-
-    uid = message.from_user.id if message.from_user else 0
-    if not await is_any_admin(uid):
-        return
-
-    is_ctrl = await is_control_group(message.chat.id)
-
-    if is_ctrl:
-        docs = await _prot_col.find({}).to_list(length=200)
-        if not docs:
-            m = await message.reply_text("📭 কোনো গ্রুপে protection সেট নেই।", parse_mode=HTML)
-            asyncio.create_task(_auto_del(m, 15))
-            return
-
-        lines = ["🛡️ <b>সব গ্রুপের Protection</b>\n━━━━━━━━━━━━━━━━━━━━━━"]
-        for d in docs:
-            cid   = d.get("chat_id", "?")
-            fwd   = "✅" if d.get("anti_forward")    else "❌"
-            lnk   = "✅" if d.get("link_protection")  else "❌"
-            sp    = "✅" if d.get("anti_spam")         else "❌"
-            lim   = d.get("spam_limit", 5)
-            lines.append(f"📍 <code>{cid}</code>  Fwd:{fwd} Link:{lnk} Spam:{sp}({lim}/10s)")
-
-        m = await message.reply_text("\n".join(lines), parse_mode=HTML)
-        asyncio.create_task(_auto_del(m, 90))
-    else:
-        cid = message.chat.id
-        cfg = await _get_prot(cid)
-        m   = await message.reply_text(
-            f"🛡️ <b>এই গ্রুপের Protection</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔄 Anti-Forward   : {'✅ চালু' if cfg.get('anti_forward')   else '❌ বন্ধ'}\n"
-            f"🔗 Link Protection: {'✅ চালু' if cfg.get('link_protection') else '❌ বন্ধ'}\n"
-            f"⚡ Anti-Spam      : {'✅ চালু' if cfg.get('anti_spam')        else '❌ বন্ধ'} "
-            f"({cfg.get('spam_limit', 5)} msgs/10s)\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"সেট: <code>/protect forward|links|spam on|off</code>",
-            parse_mode=HTML,
-        )
-        asyncio.create_task(_auto_del(m, 30))
-
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-
-# ── Main Protection Handler (group=3, fires before most handlers) ──────────────
-
-@app.on_message(filters.group & ~filters.service, group=3)
-async def _protection_handler(client: Client, message: Message):
-    if not message.from_user or message.from_user.is_bot:
-        return
-    if await _is_admin_msg(client, message):
-        return
-    uname = (message.from_user.username or "").lower()
-    if uname == BOT_OWNER_USERNAME.lower():
-        return
-
-    chat_id = message.chat.id
-    uid     = message.from_user.id
-    fname   = message.from_user.first_name or "User"
-    mention = f'<a href="tg://user?id={uid}">{fname}</a>'
-    cfg     = await _get_prot(chat_id)
-
-    # ── 1. Anti-Forward ───────────────────────────────────────────────────────
-    if cfg.get("anti_forward"):
-        is_fwd = (
-            message.forward_date is not None
-            or message.forward_from is not None
-            or message.forward_from_chat is not None
-            or message.forward_sender_name is not None
-        )
-        if is_fwd:
+        uid = message.from_user.id if message.from_user else 0
+        key = (message.chat.id, uid, "fwd")
+        old_warn = _last_warn.get(key)
+        if old_warn:
             try:
-                await message.delete()
+                await client.delete_messages(message.chat.id, old_warn)
             except Exception:
                 pass
 
-            if cfg.get("show_warning", True):
-                wkey = (chat_id, uid, "fwd")
-                old  = _last_warn.pop(wkey, None)
-                if old:
-                    try:
-                        await client.delete_messages(chat_id, old)
-                    except Exception:
-                        pass
+        warn = await client.send_message(
+            message.chat.id,
+            f"<b>Forwarded messages are not allowed in this group.</b>\n"
+            f"Admins and the group owner are exempt.",
+            parse_mode=HTML,
+        )
+        _last_warn[key] = warn.id
+        asyncio.create_task(_auto_del(warn, 15))
 
-                w = await client.send_message(
-                    chat_id,
-                    f"⚠️ {mention}\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🔄 <b>Forward করা মেসেজ এই গ্রুপে নিষিদ্ধ।</b>\n"
-                    f"মেসেজটি মুছে ফেলা হয়েছে।\n━━━━━━━━━━━━━━━━━━━━━━",
-                    parse_mode=HTML,
-                )
-                _last_warn[wkey] = w.id
-                asyncio.create_task(_auto_del(w, 30))
+    except Exception as e:
+        print(f"[PROT/FWD] Error: {e}")
 
-            asyncio.create_task(send_to_monitor(
-                client,
-                f"🔄 <b>Anti-Forward</b>\n"
-                f"👤 {mention} (<code>{uid}</code>)\n"
-                f"📌 গ্রুপ: <b>{message.chat.title}</b> (<code>{chat_id}</code>)\n"
-                f"🕛 {datetime.utcnow().strftime('%d %b %H:%M UTC')}",
-            ))
+
+# ── Enforcement: Link Protection ───────────────────────────────────────────────
+
+@app.on_message(filters.group & filters.incoming & ~filters.forwarded, group=11)
+async def enforce_link_protection(client: Client, message: Message):
+    try:
+        cfg = await _get_prot(message.chat.id)
+        if not cfg.get("link_protection"):
             return
 
-    # ── 2. Link Protection ────────────────────────────────────────────────────
-    if cfg.get("link_protection"):
-        txt = message.text or message.caption or ""
-        if _URL_RE.search(txt):
+        text = message.text or message.caption or ""
+        if not _URL_RE.search(text):
+            return
+
+        if await _is_exempt(client, message):
+            return
+
+        await message.delete()
+
+        uid = message.from_user.id if message.from_user else 0
+        key = (message.chat.id, uid, "link")
+        old_warn = _last_warn.get(key)
+        if old_warn:
             try:
-                await message.delete()
+                await client.delete_messages(message.chat.id, old_warn)
             except Exception:
                 pass
 
-            if cfg.get("show_warning", True):
-                wkey = (chat_id, uid, "link")
-                old  = _last_warn.pop(wkey, None)
-                if old:
-                    try:
-                        await client.delete_messages(chat_id, old)
-                    except Exception:
-                        pass
+        warn = await client.send_message(
+            message.chat.id,
+            "<b>Links are not allowed in this group.</b>\nGroup admins are exempt.",
+            parse_mode=HTML,
+        )
+        _last_warn[key] = warn.id
+        asyncio.create_task(_auto_del(warn, 15))
 
-                w = await client.send_message(
-                    chat_id,
-                    f"🔗 {mention}\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"<b>এই গ্রুপে লিঙ্ক শেয়ার নিষিদ্ধ।</b>\n"
-                    f"মেসেজ ডিলিট হয়েছে।\n━━━━━━━━━━━━━━━━━━━━━━",
-                    parse_mode=HTML,
-                )
-                _last_warn[wkey] = w.id
-                asyncio.create_task(_auto_del(w, 45))
+    except Exception as e:
+        print(f"[PROT/LINK] Error: {e}")
 
-            asyncio.create_task(send_to_monitor(
-                client,
-                f"🔗 <b>Link Protection</b>\n"
-                f"👤 {mention} (<code>{uid}</code>)\n"
-                f"📌 গ্রুপ: <b>{message.chat.title}</b> (<code>{chat_id}</code>)\n"
-                f"🕛 {datetime.utcnow().strftime('%d %b %H:%M UTC')}",
-            ))
+
+# ── Enforcement: Anti-Spam + Auto-Delete Links/Forwards from non-admins ────────
+
+@app.on_message(filters.group & filters.incoming, group=12)
+async def enforce_anti_spam(client: Client, message: Message):
+    try:
+        cfg = await _get_prot(message.chat.id)
+        if not cfg.get("anti_spam"):
             return
 
-    # ── 3. Anti-Spam ──────────────────────────────────────────────────────────
-    if cfg.get("anti_spam"):
-        limit  = cfg.get("spam_limit", 5)
-        skey   = (chat_id, uid)
-        now_ts = time.monotonic()
-        dq     = _spam_track[skey]
+        if await _is_exempt(client, message):
+            return
 
-        while dq and now_ts - dq[0] > 10:
-            dq.popleft()
-        dq.append(now_ts)
+        uid = message.from_user.id if message.from_user else 0
+        key = (message.chat.id, uid)
+        now = time.monotonic()
 
-        if len(dq) >= limit:
-            last = _muted_at.get(skey, 0)
-            if now_ts - last < 60:
+        track = _spam_track[key]
+        while track and now - track[0] > 10:
+            track.popleft()
+        track.append(now)
+
+        limit = cfg.get("spam_limit", 5)
+        if len(track) > limit:
+            muted_time = _muted_at.get(key, 0)
+            if now - muted_time < 300:
                 return
-            _muted_at[skey] = now_ts
-            dq.clear()
+            _muted_at[key] = now
 
             try:
+                until = datetime.utcnow() + timedelta(minutes=5)
                 await client.restrict_chat_member(
-                    chat_id, uid,
+                    message.chat.id,
+                    uid,
                     ChatPermissions(can_send_messages=False),
-                    until_date=datetime.utcnow() + timedelta(minutes=5),
+                    until_date=until,
                 )
-            except Exception:
-                pass
-
-            wkey = (chat_id, uid, "spam")
-            old  = _last_warn.pop(wkey, None)
-            if old:
-                try:
-                    await client.delete_messages(chat_id, old)
-                except Exception:
-                    pass
-
-            w = await client.send_message(
-                chat_id,
-                f"⚡ {mention}\n━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"<b>Spam সনাক্ত!</b> {limit}+ মেসেজ ১০ সেকেন্ডে।\n"
-                f"⏱ <b>৫ মিনিটের Mute</b>\n━━━━━━━━━━━━━━━━━━━━━━",
-                parse_mode=HTML,
-            )
-            _last_warn[wkey] = w.id
-            asyncio.create_task(_auto_del(w, 60))
-            asyncio.create_task(send_to_monitor(
-                client,
-                f"⚡ <b>Anti-Spam — Muted</b>\n"
-                f"👤 {mention} (<code>{uid}</code>)\n"
-                f"📌 গ্রুপ: <b>{message.chat.title}</b> (<code>{chat_id}</code>)\n"
-                f"📊 Limit: {limit} msgs/10s → 5 মিনিট Mute\n"
-                f"🕛 {datetime.utcnow().strftime('%d %b %H:%M UTC')}",
-            ))
+                warn = await client.send_message(
+                    message.chat.id,
+                    f"<b>Spam detected.</b> User has been muted for 5 minutes.",
+                    parse_mode=HTML,
+                )
+                asyncio.create_task(_auto_del(warn, 20))
+            except Exception as e:
+                print(f"[PROT/SPAM] Mute error: {e}")
+    except Exception as e:
+        print(f"[PROT/SPAM] Error: {e}")
