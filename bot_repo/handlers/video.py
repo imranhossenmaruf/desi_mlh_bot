@@ -92,9 +92,12 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
 
     doc = await users_col.find_one({"user_id": user_id})
     if (doc or {}).get("bot_banned"):
-        from strings import get_string, get_user_lang
-        _ban_lang = (doc or {}).get("lang", "en")
-        return get_string("video_banned", lang=_ban_lang)
+        return (
+            "🚫 <b>Access Restricted</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Your access to this bot has been\n"
+            "suspended by the admin."
+        )
 
     vid_date  = (doc or {}).get("video_date", "")
     vid_count = (doc or {}).get("video_count", 0) if vid_date == today else 0
@@ -123,13 +126,15 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
         remaining = midnight + timedelta(days=1) - datetime.utcnow()
         hrs, rem  = divmod(int(remaining.total_seconds()), 3600)
         mins      = rem // 60
-        from strings import get_string
-        # Detect user's language from DB
-        _udata = await users_col.find_one({"user_id": user_id}) or {}
-        _ulang = _udata.get("lang", "en")
-        limit_text = get_string("video_limit_reached", lang=_ulang,
-                                limit=effective_limit, hrs=hrs, mins=mins)
-        # Send directly with Premium contact button
+        limit_text = (
+            "⚠️ <b>Daily Limit Reached</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📹 You have used all <b>{effective_limit}</b> video requests for today.\n\n"
+            f"🔄 Resets in: <b>{hrs}h {mins}m</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💎 <b>Upgrade to Premium</b> for more videos every day!\n"
+            "Contact 👉 @IH_Maruf"
+        )
         await _bot_api_for(client, "sendMessage", {
             "chat_id":    user_id,
             "text":       limit_text,
@@ -153,14 +158,23 @@ async def _send_video_to_user(client: Client, user_id: int) -> str:
         all_docs  = await videos_col.find({}).to_list(length=None)
     pool      = [d for d in all_docs if d["message_id"] not in seen_ids]
 
-    from strings import get_string as _gs
-    _ulang = (doc or {}).get("lang", "en")
-
     if not all_docs:
-        return _gs("video_no_videos", lang=_ulang)
+        return (
+            "📭 <b>No Videos Available</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "There are no videos in the library yet.\n\n"
+            "📩 Please contact the admin to add videos."
+        )
 
     if not pool:
-        return _gs("video_all_watched", lang=_ulang)
+        return (
+            "🎬 <b>You've Watched Everything!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "You have already seen all available videos\n"
+            "within the last 7 days. 🙌\n\n"
+            "🔄 New videos will be available soon.\n"
+            "Try again later or contact the admin."
+        )
 
     chosen    = random.choice(pool)
     msg_id    = chosen["message_id"]

@@ -30,8 +30,6 @@ from config import (
     DAILY_VIDEO_LIMIT, app,
 )
 from helpers import bot_api, BOT_TOKEN, _bot_token_ctx
-from strings import get_string
-
 
 _PLACEHOLDER_THUMB = "https://telegra.ph/file/6b02e984e1f7d45f5e6ab.jpg"
 

@@ -22,7 +22,7 @@ from pyrogram.types import Message
 
 from config import HTML, ADMIN_IDS, app, cmd_control_col, lang_settings_col
 from helpers import admin_filter, _auto_del
-from strings import SUPPORTED_LANGS
+SUPPORTED_LANGS = {"en", "bn", "ar"}
 
 # ── In-memory caches to reduce DB calls ───────────────────────────────────────
 # _cmd_cache[key] = True (enabled) | False (disabled)

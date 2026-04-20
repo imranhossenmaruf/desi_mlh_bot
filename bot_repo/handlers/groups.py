@@ -366,35 +366,21 @@ async def _handle_bot_added(client: Client, chat, added_by=None):
 
     await _upsert_group(chat, added_by, bot_is_admin, can_invite)
 
-    # ── Auto-detect and store group language ─────────────────────────────────
-    try:
-        from strings import resolve_lang
-        from handlers.cmd_control import set_group_lang
-        adder_lang_code = getattr(added_by, "language_code", None)
-        detected_lang   = resolve_lang(adder_lang_code)
-        await set_group_lang(chat.id, detected_lang)
-        print(f"[LANG] Group {chat.id} language auto-set to '{detected_lang}' "
-              f"(adder lang_code={adder_lang_code!r})")
-    except Exception as _le:
-        print(f"[LANG] Could not auto-set group language: {_le}")
-
     adder_name    = getattr(added_by, "first_name", None) or "Unknown"
     adder_id      = getattr(added_by, "id", None) or 0
     adder_mention = f"<a href='tg://user?id={adder_id}'>{adder_name}</a>"
 
-    # ── Simple welcome message (all groups) — language-aware ─────────────
-    try:
-        from handlers.cmd_control import get_group_lang as _ggl
-        from strings import get_string as _gs
-        _grp_lang  = await _ggl(chat.id)
-        welcome_text = _gs("bot_added_group", lang=_grp_lang, adder=adder_mention)
-    except Exception:
-        welcome_text = (
-            f"🤖 <b>Bot has been added!</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"🙏 Thank you {adder_mention} for adding the bot!\n\n"
-            f"/start /video /daily /help /lang"
-        )
+    welcome_text = (
+        f"🤖 <b>Bot has been added!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🙏 Thank you {adder_mention} for adding the bot!\n\n"
+        f"📋 <b>User Commands:</b>\n"
+        f"/start — Start the bot\n"
+        f"/video — Get a video\n"
+        f"/daily — Daily reward\n"
+        f"/help  — Show commands\n"
+        f"━━━━━━━━━━━━━━━━━━━"
+    )
 
     buttons = InlineKeyboardMarkup([
         [

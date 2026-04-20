@@ -204,7 +204,12 @@ router.post("/github/push", async (req, res) => {
 
   try {
     const authedUrl = buildAuthenticatedUrl(state.repoUrl, token);
-    execSync(`git -C "${BOT_REPO_DIR}" remote set-url origin "${authedUrl}"`, { stdio: "pipe" });
+    // Add remote if it doesn't exist, otherwise update the URL
+    try {
+      execSync(`git -C "${BOT_REPO_DIR}" remote add origin "${authedUrl}"`, { stdio: "pipe" });
+    } catch {
+      execSync(`git -C "${BOT_REPO_DIR}" remote set-url origin "${authedUrl}"`, { stdio: "pipe" });
+    }
 
     // Configure git user if not set
     try {

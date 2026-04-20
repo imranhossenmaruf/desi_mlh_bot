@@ -1,9 +1,12 @@
 """
-Tag System - গ্রুপের সদস্যদের মেনশন করা
-- Batch delay বাড়ানো হয়েছে Telegram flood limit এড়াতে
-- Visible mention ব্যবহার করা হয়েছে (invisible ZWNJ সরানো হয়েছে)
-- Rate limiting কঠোর করা হয়েছে (5 মিনিট cooldown)
-- সদস্য সংখ্যা সীমিত করা হয়েছে (200 জন)
+Tag System
+- /taggroup [message]  — mention all group members in batches of 4
+- /tagall [message]    — alias for /taggroup (backward compat)
+- /utag [message]      — alias for /taggroup
+- /stoptag             — cancel active tagging
+- /tagstatus           — check tagging progress
+
+Only group admins can use these commands.
 """
 
 import asyncio
@@ -16,24 +19,26 @@ from pyrogram.types import Message, ChatMember
 from config import HTML, app, db
 from helpers import _auto_del, _is_admin_msg
 
-BATCH_SIZE = 5
-BATCH_DELAY = 3.0
-COOLDOWN_SECONDS = 300
+BATCH_SIZE     = 4      # 4 mentions per message
+BATCH_DELAY    = 2.5    # seconds between batches (2-3s as requested)
+COOLDOWN_SECONDS = 300  # 5-minute cooldown per group
 
 active_tagging_sessions: Dict[int, Dict] = {}
-tagging_cooldown: Dict[int, datetime] = {}
+tagging_cooldown: Dict[int, datetime]    = {}
 
 tagger_logs_col = db["tagger_logs"]
 
 
-async def log_tagging_event(chat_id: int, user_id: int, member_count: int, message: str, status: str):
+async def log_tagging_event(
+    chat_id: int, user_id: int, member_count: int, message: str, status: str
+):
     await tagger_logs_col.insert_one({
-        "chat_id": chat_id,
-        "admin_id": user_id,
+        "chat_id":      chat_id,
+        "admin_id":     user_id,
         "member_count": member_count,
-        "message": message,
-        "status": status,
-        "timestamp": datetime.utcnow(),
+        "message":      message,
+        "status":       status,
+        "timestamp":    datetime.utcnow(),
     })
 
 
@@ -55,17 +60,9 @@ def _create_mention(user) -> str:
     return f'<a href="tg://user?id={user.id}">{name}</a>'
 
 
-def _create_batch_mentions(members: List[ChatMember]) -> str:
-    mentions = []
-    for member in members:
-        if not member.user.is_bot and not member.user.is_deleted:
-            mentions.append(_create_mention(member.user))
-    return "  ".join(mentions)
-
-
 def _is_in_cooldown(chat_id: int) -> tuple:
     if chat_id in tagging_cooldown:
-        elapsed = (datetime.utcnow() - tagging_cooldown[chat_id]).total_seconds()
+        elapsed   = (datetime.utcnow() - tagging_cooldown[chat_id]).total_seconds()
         remaining = int(COOLDOWN_SECONDS - elapsed)
         if remaining > 0:
             return True, remaining
@@ -76,7 +73,7 @@ def _set_cooldown(chat_id: int):
     tagging_cooldown[chat_id] = datetime.utcnow()
 
 
-async def execute_tagall(
+async def execute_taggroup(
     client: Client,
     chat_id: int,
     admin_id: int,
@@ -85,46 +82,49 @@ async def execute_tagall(
     if chat_id in active_tagging_sessions:
         session = active_tagging_sessions[chat_id]
         if not session.get("cancelled"):
-            return False, "❌ এই গ্রুপে ইতিমধ্যে tagging চলছে।"
+            return False, "❌ Tagging is already in progress in this group."
 
     in_cd, remaining = _is_in_cooldown(chat_id)
     if in_cd:
         mins = remaining // 60
         secs = remaining % 60
-        return False, f"⏳ Cooldown চলছে। {mins}m {secs}s পরে আবার চেষ্টা করুন।"
+        return False, f"⏳ Cooldown active. Try again in {mins}m {secs}s."
 
     members = await get_group_members(client, chat_id)
     if not members:
-        return False, "❌ সদস্যদের তালিকা আনতে পারা যায়নি। বটের পারমিশন চেক করুন।"
+        return False, "❌ Could not fetch members. Check bot permissions."
 
     real_members = [m for m in members if not m.user.is_bot and not m.user.is_deleted]
     if not real_members:
-        return False, "❌ এই গ্রুপে কোনো সদস্য পাওয়া যায়নি।"
+        return False, "❌ No members found to tag."
 
     session = {
-        "user_id": admin_id,
-        "cancelled": False,
-        "started_at": datetime.utcnow(),
+        "user_id":        admin_id,
+        "cancelled":      False,
+        "started_at":     datetime.utcnow(),
         "target_members": real_members,
-        "tagged_count": 0,
-        "total_count": len(real_members),
+        "tagged_count":   0,
+        "total_count":    len(real_members),
         "custom_message": custom_message,
     }
 
     task = asyncio.create_task(
         _execute_tagging_loop(client, chat_id, session)
     )
-    session["task"] = task
+    session["task"]             = task
     active_tagging_sessions[chat_id] = session
     _set_cooldown(chat_id)
 
-    await log_tagging_event(chat_id, admin_id, len(real_members), custom_message or "[@all]", "started")
-    return True, f"🚀 {len(real_members)} জন সদস্যকে tag করা শুরু হচ্ছে...\n⏳ একটু সময় লাগবে..."
+    await log_tagging_event(
+        chat_id, admin_id, len(real_members),
+        custom_message or "[@all]", "started"
+    )
+    return True, f"🚀 Starting to tag {len(real_members)} members...\n⏳ Please wait."
 
 
 async def _execute_tagging_loop(client: Client, chat_id: int, session: Dict):
-    admin_id = session["user_id"]
-    members = session["target_members"]
+    admin_id       = session["user_id"]
+    members        = session["target_members"]
     custom_message = session.get("custom_message", "")
 
     try:
@@ -132,26 +132,21 @@ async def _execute_tagging_loop(client: Client, chat_id: int, session: Dict):
             if session.get("cancelled"):
                 break
 
-            batch = members[i:i + BATCH_SIZE]
-            batch_mentions = _create_batch_mentions(batch)
-
-            if not batch_mentions:
+            batch   = members[i : i + BATCH_SIZE]
+            real    = [m for m in batch if not m.user.is_bot and not m.user.is_deleted]
+            if not real:
                 continue
 
+            mentions = "  ".join(_create_mention(m.user) for m in real)
+
             if custom_message:
-                message_text = f"📢 <b>{custom_message}</b>\n\n{batch_mentions}"
+                body = f"📢 <b>{custom_message}</b>\n\n{mentions}"
             else:
-                message_text = batch_mentions
+                body = mentions
 
             try:
-                await client.send_message(
-                    chat_id,
-                    message_text,
-                    parse_mode=HTML,
-                )
-                batch_tagged = len([m for m in batch if not m.user.is_bot])
-                session["tagged_count"] += batch_tagged
-
+                await client.send_message(chat_id, body, parse_mode=HTML)
+                session["tagged_count"] += len(real)
             except Exception as e:
                 print(f"[TAGGER] Batch error in chat {chat_id}: {e}")
                 await asyncio.sleep(5)
@@ -160,38 +155,39 @@ async def _execute_tagging_loop(client: Client, chat_id: int, session: Dict):
             if i + BATCH_SIZE < len(members):
                 await asyncio.sleep(BATCH_DELAY)
 
-        total_tagged = session["tagged_count"]
+        total  = session["tagged_count"]
         status = "cancelled" if session.get("cancelled") else "completed"
         await log_tagging_event(
-            chat_id, admin_id, total_tagged, custom_message or "[@all]", status
+            chat_id, admin_id, total, custom_message or "[@all]", status
         )
 
         if not session.get("cancelled"):
-            completion_msg = (
-                f"✅ <b>Tagging সম্পন্ন!</b>\n\n"
-                f"👥 Tagged: <b>{total_tagged}/{len(members)}</b>"
+            done_msg = await client.send_message(
+                chat_id,
+                f"✅ <b>Tagging complete!</b>\n\n👥 Tagged: <b>{total}/{len(members)}</b>",
+                parse_mode=HTML,
             )
-            msg = await client.send_message(chat_id, completion_msg, parse_mode=HTML)
             await asyncio.sleep(10)
             try:
-                await msg.delete()
+                await done_msg.delete()
             except Exception:
                 pass
 
     except Exception as e:
         print(f"[TAGGER] Loop error for chat {chat_id}: {e}")
-        await log_tagging_event(chat_id, admin_id, session["tagged_count"], custom_message or "[@all]", "error")
-
+        await log_tagging_event(
+            chat_id, admin_id, session["tagged_count"],
+            custom_message or "[@all]", "error"
+        )
     finally:
-        if chat_id in active_tagging_sessions:
-            del active_tagging_sessions[chat_id]
+        active_tagging_sessions.pop(chat_id, None)
 
 
 async def cancel_tagging(chat_id: int) -> tuple:
     if chat_id not in active_tagging_sessions:
-        return False, "❌ এই গ্রুপে কোনো active tagging নেই।"
+        return False, "❌ No active tagging in this group."
 
-    session = active_tagging_sessions[chat_id]
+    session           = active_tagging_sessions[chat_id]
     session["cancelled"] = True
 
     try:
@@ -200,14 +196,17 @@ async def cancel_tagging(chat_id: int) -> tuple:
         session["task"].cancel()
 
     tagged_count = session["tagged_count"]
-    return True, f"🛑 Tagging বন্ধ করা হয়েছে। {tagged_count} জনকে tag করা হয়েছিল।"
+    return True, f"🛑 Tagging stopped. {tagged_count} members were tagged."
 
 
-@app.on_message(filters.command("tagall") & filters.group)
-async def tagall_cmd(client: Client, message: Message):
+# ── /taggroup (primary command) ───────────────────────────────────────────────
+
+@app.on_message(filters.command("taggroup") & filters.group)
+async def taggroup_cmd(client: Client, message: Message):
+    """Tag all group members in batches of 4. Admin only."""
     if not await _is_admin_msg(client, message):
         m = await message.reply_text(
-            "❌ <b>শুধুমাত্র Admin</b>\n\nএই command শুধু গ্রুপ admin ব্যবহার করতে পারবেন।",
+            "❌ <b>Admins Only</b>\n\nOnly group admins can use this command.",
             parse_mode=HTML,
         )
         await asyncio.sleep(10)
@@ -217,41 +216,46 @@ async def tagall_cmd(client: Client, message: Message):
             pass
         return
 
-    chat_id = message.chat.id
+    chat_id  = message.chat.id
     admin_id = message.from_user.id
+    args     = message.command[1:]
+    custom   = " ".join(args) if args else None
 
-    args = message.command[1:]
-    custom_message = " ".join(args) if args else None
-
-    success, status_msg = await execute_tagall(
-        client,
-        chat_id,
-        admin_id,
-        custom_message=custom_message,
+    success, status_msg = await execute_taggroup(
+        client, chat_id, admin_id, custom_message=custom
     )
 
     m = await message.reply_text(status_msg, parse_mode=HTML)
-
     if success:
         await asyncio.sleep(5)
         try:
             await m.delete()
         except Exception:
             pass
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
+# ── /tagall and /utag — aliases ───────────────────────────────────────────────
+
+@app.on_message(filters.command("tagall") & filters.group)
+async def tagall_cmd(client: Client, message: Message):
+    await taggroup_cmd(client, message)
 
 
 @app.on_message(filters.command("utag") & filters.group)
 async def utag_cmd(client: Client, message: Message):
-    await tagall_cmd(client, message)
+    await taggroup_cmd(client, message)
 
+
+# ── /stoptag ──────────────────────────────────────────────────────────────────
 
 @app.on_message(filters.command("stoptag") & filters.group)
 async def stoptag_cmd(client: Client, message: Message):
     if not await _is_admin_msg(client, message):
-        m = await message.reply_text(
-            "❌ <b>শুধুমাত্র Admin</b>",
-            parse_mode=HTML,
-        )
+        m = await message.reply_text("❌ <b>Admins Only</b>", parse_mode=HTML)
         await asyncio.sleep(10)
         try:
             await m.delete()
@@ -259,9 +263,7 @@ async def stoptag_cmd(client: Client, message: Message):
             pass
         return
 
-    chat_id = message.chat.id
-    success, status_msg = await cancel_tagging(chat_id)
-
+    success, status_msg = await cancel_tagging(message.chat.id)
     m = await message.reply_text(status_msg, parse_mode=HTML)
     await asyncio.sleep(5)
     try:
@@ -270,6 +272,8 @@ async def stoptag_cmd(client: Client, message: Message):
         pass
 
 
+# ── /tagstatus ────────────────────────────────────────────────────────────────
+
 @app.on_message(filters.command("tagstatus") & filters.group)
 async def tagstatus_cmd(client: Client, message: Message):
     if not await _is_admin_msg(client, message):
@@ -277,14 +281,14 @@ async def tagstatus_cmd(client: Client, message: Message):
 
     chat_id = message.chat.id
     if chat_id not in active_tagging_sessions:
-        status = "✅ কোনো active tagging নেই।"
+        status = "✅ No active tagging in progress."
     else:
         session = active_tagging_sessions[chat_id]
         progress = session["tagged_count"]
-        total = session["total_count"]
-        percent = int((progress / total) * 100) if total > 0 else 0
+        total    = session["total_count"]
+        percent  = int((progress / total) * 100) if total > 0 else 0
         status = (
-            f"🔄 <b>Tagging চলছে</b>\n"
+            f"🔄 <b>Tagging in progress</b>\n"
             f"👥 Tagged: {progress}/{total} ({percent}%)"
         )
 

@@ -1,9 +1,14 @@
 """
-Monitor Group — সব পরিচালিত গ্রুপের মেসেজ Monitor Group-এ ফরওয়ার্ড করে,
-এবং সেখান থেকে Admin রিপ্লাই দিলে সেটা আবার মূল গ্রুপে পাঠায়।
+Monitor Group — relay managed group messages to the Monitor Group.
+- Text messages are sent as formatted: "From Group: [Name] | [content]"
+- Media messages are forwarded with a source header
+- Per-group rate throttle: max 5 messages per minute (12s minimum interval)
+- Admin replies from Monitor Group are relayed back to the original group.
 """
 
 import asyncio
+import time
+
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
@@ -11,6 +16,10 @@ from config import HTML, app, db, groups_col
 from helpers import bot_api, _auto_del, BOT_TOKEN
 
 _monitor_relay_col = db["monitor_relay_messages"]
+
+# Per-group rate throttle: one message per 12 seconds maximum (= 5/min)
+_last_fwd_time: dict[int, float] = {}
+_FWD_MIN_INTERVAL = 12.0
 
 
 async def _get_monitor_id() -> int | None:
@@ -23,18 +32,11 @@ async def _get_control_id() -> int | None:
     return await get_control_group()
 
 
-# ── ১. সব গ্রুপের মেসেজ Monitor Group-এ পাঠানো ────────────────────────────────
-
-_last_fwd_time: dict[int, float] = {}  # chat_id → last forward timestamp
-_FWD_MIN_INTERVAL = 2.0  # প্রতি গ্রুপ থেকে min 2 সেকেন্ড পরপর forward করা হবে
-
+# ── Relay group messages to Monitor Group ──────────────────────────────────────
 
 @app.on_message(filters.group & filters.incoming, group=20)
 async def relay_group_msg_to_monitor(client: Client, message: Message):
-    """পরিচালিত গ্রুপের মেসেজ Monitor Group-এ ফরওয়ার্ড করে।
-    Rate limiting যোগ করা হয়েছে flood বড়ানো এড়াতে।
-    """
-    import time
+    """Forward managed group messages to Monitor Group with source info."""
     try:
         monitor_id = await _get_monitor_id()
         if not monitor_id:
@@ -53,35 +55,75 @@ async def relay_group_msg_to_monitor(client: Client, message: Message):
             return
 
         sender = message.from_user
-        if not sender:
-            return
-        if sender.is_bot or sender.is_self:
+        if not sender or sender.is_bot or sender.is_self:
             return
 
         raw = (message.text or message.caption or "").lstrip()
         if raw.startswith("/"):
             return
 
-        # Rate limit: প্রতি গ্রুপ থেকে মিনিমাম 2 সেকেন্ড interval
-        now = time.monotonic()
+        # Per-group rate throttle
+        now  = time.monotonic()
         last = _last_fwd_time.get(chat_id, 0)
         if now - last < _FWD_MIN_INTERVAL:
             return
         _last_fwd_time[chat_id] = now
 
-        chat_title = message.chat.title or str(chat_id)
+        chat_title   = message.chat.title or str(chat_id)
+        sender_name  = sender.first_name or "Unknown"
+        sender_link  = f'<a href="tg://user?id={sender.id}">{sender_name}</a>'
 
-        fwd_res = await bot_api("forwardMessage", {
-            "chat_id":      monitor_id,
-            "from_chat_id": chat_id,
-            "message_id":   message.id,
-        })
+        relay_msg_id = None
 
-        if fwd_res.get("ok"):
-            fwd_msg_id = fwd_res["result"]["message_id"]
+        if message.text:
+            # Format: "From Group: [Name] | [content]"
+            content = message.text[:500]  # cap long messages
+            formatted = (
+                f"📡 <b>From Group: {chat_title}</b>\n"
+                f"👤 {sender_link}\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{content}"
+            )
+            res = await bot_api("sendMessage", {
+                "chat_id":    monitor_id,
+                "text":       formatted,
+                "parse_mode": "HTML",
+            })
+            if res.get("ok"):
+                relay_msg_id = res["result"]["message_id"]
 
+        else:
+            # For media: send a header first, then forward the media
+            media_type = (
+                "📷 Photo"   if message.photo    else
+                "🎬 Video"   if message.video    else
+                "🎙 Voice"   if message.voice    else
+                "🎵 Audio"   if message.audio    else
+                "📄 File"    if message.document else
+                "🎭 Sticker" if message.sticker  else
+                "📎 Media"
+            )
+            header = (
+                f"📡 <b>From Group: {chat_title}</b> | {media_type}\n"
+                f"👤 {sender_link}"
+            )
+            await bot_api("sendMessage", {
+                "chat_id":    monitor_id,
+                "text":       header,
+                "parse_mode": "HTML",
+            })
+
+            fwd = await bot_api("forwardMessage", {
+                "chat_id":      monitor_id,
+                "from_chat_id": chat_id,
+                "message_id":   message.id,
+            })
+            if fwd.get("ok"):
+                relay_msg_id = fwd["result"]["message_id"]
+
+        if relay_msg_id:
             await _monitor_relay_col.insert_one({
-                "monitor_msg_id":   fwd_msg_id,
+                "monitor_msg_id":   relay_msg_id,
                 "original_chat_id": chat_id,
                 "original_msg_id":  message.id,
                 "monitor_group_id": monitor_id,
@@ -93,11 +135,11 @@ async def relay_group_msg_to_monitor(client: Client, message: Message):
         print(f"[MONITOR_RELAY] Error: {e}")
 
 
-# ── ২. Monitor Group থেকে রিপ্লাই দিলে মূল গ্রুপে পাঠানো ─────────────────────
+# ── Relay admin reply from Monitor Group back to original group ────────────────
 
 @app.on_message(filters.group & filters.incoming, group=21)
 async def monitor_group_reply_handler(client: Client, message: Message):
-    """Monitor Group-এ reply করলে তা মূল গ্রুপে পাঠায়।"""
+    """When admin replies in Monitor Group, relay the reply to the source group."""
     try:
         monitor_id = await _get_monitor_id()
         if not monitor_id:
@@ -109,12 +151,10 @@ async def monitor_group_reply_handler(client: Client, message: Message):
         if not replied:
             return
 
-        # কমান্ড হলে skip করো
         raw_text = message.text or message.caption or ""
         if raw_text.startswith("/"):
             return
 
-        # Original মেসেজের mapping খোঁজো
         mapping = await _monitor_relay_col.find_one({
             "monitor_msg_id":   replied.id,
             "monitor_group_id": monitor_id,
@@ -169,9 +209,9 @@ async def monitor_group_reply_handler(client: Client, message: Message):
             except Exception:
                 pass
         elif result:
-            err = result.get("description", "অজানা ত্রুটি")
+            err = result.get("description", "Unknown error")
             m = await message.reply_text(
-                f"❌ পাঠানো যায়নি: <code>{err}</code>", parse_mode=HTML
+                f"❌ Failed to send: <code>{err}</code>", parse_mode=HTML
             )
             asyncio.create_task(_auto_del(m, 15))
 

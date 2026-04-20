@@ -173,22 +173,14 @@ async def save_user(user) -> bool:
     if await users_col.find_one({"user_id": user.id}):
         return False
 
-    from strings import resolve_lang, _user_lang_cache
-    lang_code = getattr(user, "language_code", None)
-    detected_lang = resolve_lang(lang_code)
-    # Populate in-memory cache immediately so the very first reply is translated
-    _user_lang_cache[user.id] = detected_lang
-
     await users_col.insert_one({
-        "user_id":       user.id,
-        "username":      user.username,
-        "first_name":    user.first_name,
-        "last_name":     user.last_name,
-        "language_code": lang_code,
-        "lang":          detected_lang,
-        "ref_count":     0,
-        "points":        0,
-        "joined_at":     datetime.utcnow(),
+        "user_id":    user.id,
+        "username":   user.username,
+        "first_name": user.first_name,
+        "last_name":  user.last_name,
+        "ref_count":  0,
+        "points":     0,
+        "joined_at":  datetime.utcnow(),
     })
     return True
 
@@ -251,25 +243,48 @@ def has_media(message: Message) -> bool:
 
 
 def audience_label(session: dict) -> str:
-    if session["audience"] == "all":
-        return "All Users"
+    aud = session.get("audience", "all")
+    if aud == "all":
+        return "All Users + Groups"
+    if aud == "private":
+        return "Private Users Only"
+    if aud == "groups":
+        return "Groups Only"
     dt = session.get("join_after")
     return f"Joined after {dt.strftime('%d.%m.%Y %H:%M')}" if dt else "—"
 
 
 async def count_targets(session: dict) -> int:
-    if session["audience"] == "all":
+    aud = session.get("audience", "all")
+    if aud == "all":
+        users  = await users_col.count_documents({})
+        groups = await groups_col.count_documents({})
+        return users + groups
+    if aud == "private":
         return await users_col.count_documents({})
+    if aud == "groups":
+        return await groups_col.count_documents({})
     dt = session.get("join_after")
     return await users_col.count_documents({"joined_at": {"$gt": dt}}) if dt else 0
 
 
 async def get_target_users(session: dict) -> list[dict]:
-    if session["audience"] == "all":
-        return await users_col.find({}, {"user_id": 1}).to_list(length=None)
+    aud = session.get("audience", "all")
+    if aud == "all":
+        users  = await users_col.find({}, {"user_id": 1}).to_list(length=None)
+        grps   = await groups_col.find({}, {"chat_id": 1}).to_list(length=None)
+        return [{"user_id": d["user_id"], "_type": "user"}  for d in users] + \
+               [{"user_id": d["chat_id"], "_type": "group"} for d in grps]
+    if aud == "private":
+        docs = await users_col.find({}, {"user_id": 1}).to_list(length=None)
+        return [{"user_id": d["user_id"], "_type": "user"} for d in docs]
+    if aud == "groups":
+        docs = await groups_col.find({}, {"chat_id": 1}).to_list(length=None)
+        return [{"user_id": d["chat_id"], "_type": "group"} for d in docs]
     dt = session.get("join_after")
     if dt:
-        return await users_col.find({"joined_at": {"$gt": dt}}, {"user_id": 1}).to_list(length=None)
+        docs = await users_col.find({"joined_at": {"$gt": dt}}, {"user_id": 1}).to_list(length=None)
+        return [{"user_id": d["user_id"], "_type": "user"} for d in docs]
     return []
 
 
@@ -315,8 +330,12 @@ def kb_customize(extra_buttons=None, mode: str = "broadcast"):
 def kb_audience():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("👥 All Users",       callback_data="bc_all"),
-            InlineKeyboardButton("📅 Joined After...", callback_data="bc_join_after"),
+            InlineKeyboardButton("👥 ALL",        callback_data="bc_all"),
+            InlineKeyboardButton("👤 PRIVATE",    callback_data="bc_private"),
+        ],
+        [
+            InlineKeyboardButton("🏘 GROUPS",    callback_data="bc_groups"),
+            InlineKeyboardButton("📅 Joined After", callback_data="bc_join_after"),
         ],
         [InlineKeyboardButton("❌ Cancel", callback_data="bc_cancel")],
     ])
@@ -551,9 +570,11 @@ async def do_broadcast(client: Client, session: dict, status_msg: Message):
 
     async def refresh_status():
         pct = int((sent + failed) / total * 100) if total else 100
+        aud_label = audience_label(session)
         await status_msg.edit_text(
             "📡 <b>Broadcasting in progress...</b>\n\n"
-            f"👥 Target Users: <b>{total:,}</b>\n"
+            f"🎯 Audience: <b>{aud_label}</b>\n"
+            f"👥 Total: <b>{total:,}</b>\n"
             f"✅ Sent: <b>{sent:,}</b>\n"
             f"❌ Failed: <b>{failed:,}</b>\n"
             f"⏳ Progress: <b>{pct}%</b>",
@@ -561,12 +582,13 @@ async def do_broadcast(client: Client, session: dict, status_msg: Message):
         )
 
     for doc in targets:
-        uid = doc["user_id"]
+        uid      = doc["user_id"]
+        is_group = doc.get("_type") == "group"
         try:
             await send_to_user(client, uid, session, reply_markup=extra_kb)
             sent += 1
         except Exception as _err:
-            print(f"[BROADCAST] uid={uid} FAILED: {_err}")
+            print(f"[BROADCAST] {'group' if is_group else 'user'}={uid} FAILED: {_err}")
             failed += 1
 
         now = asyncio.get_event_loop().time()
@@ -576,31 +598,26 @@ async def do_broadcast(client: Client, session: dict, status_msg: Message):
                 last_edit = now
             except Exception:
                 pass
-        await asyncio.sleep(0.5)  # broadcast loop এ flood limit এড়াতে 0.5s delay
+        await asyncio.sleep(0.1)  # slow-mode: 0.1s delay between messages
 
     try:
         await refresh_status()
     except Exception:
         pass
 
-    # গ্রুপে broadcast পাঠানো বন্ধ করা হয়েছে।
-    # গ্রুপে unsolicited broadcast পাঠানো Telegram ToS violation এবং
-    # এটি bot ban এর একটি প্রধান কারণ।
-    group_sent = 0
-    group_failed = 0
-
     aud = audience_label(session)
     await status_msg.edit_text(
         "✅ <b>Broadcast Sent Successfully!</b>\n\n"
-        f"📨 Users: <b>{sent:,}</b> delivered, <b>{failed:,}</b> failed\n"
-        "\nUse /broadcast to start a new broadcast anytime.",
+        f"🎯 Audience: <b>{aud}</b>\n"
+        f"📨 Sent: <b>{sent:,}</b>  ❌ Failed: <b>{failed:,}</b>\n\n"
+        "Use /broadcast to start a new broadcast anytime.",
         parse_mode=HTML,
     )
     broadcast_sessions.pop(session.get("chat_id", ADMIN_ID), None)
     await log_event(client,
         f"📢 <b>Broadcast Completed</b>\n"
-        f"👥 Filter: {aud}\n"
-        f"✅ Users: <b>{sent:,}</b>  ❌ Failed: <b>{failed:,}</b>"
+        f"🎯 Audience: {aud}\n"
+        f"✅ Sent: <b>{sent:,}</b>  ❌ Failed: <b>{failed:,}</b>"
     )
 
 

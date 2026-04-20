@@ -12,7 +12,6 @@ from config import (
 from helpers import (
     get_bot_username, save_user, get_rank, get_status, log_event, bot_api,
 )
-from strings import get_string, get_user_lang, set_user_lang, LANG_NAMES, SUPPORTED_LANGS
 
 
 @filters.create
@@ -69,9 +68,14 @@ async def start_handler(client: Client, message: Message):
         from handlers.forcejoin import _check_force_join, _fj_join_buttons
         not_joined = await _check_force_join(user.id, client)
         if not_joined:
-            _ulang = await get_user_lang(user.id)
             await message.reply_text(
-                get_string("force_join_required", lang=_ulang, count=len(not_joined)),
+                "📢 <b>JOIN REQUIRED</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"You must join all <b>{len(not_joined)}</b> channel(s) below\n"
+                "before you can receive videos.\n\n"
+                "1️⃣ Join each channel using the buttons\n"
+                "2️⃣ Tap ✅ to verify and get your video\n"
+                "━━━━━━━━━━━━━━━━━━━━━━",
                 parse_mode=HTML,
                 reply_markup=InlineKeyboardMarkup(_fj_join_buttons(not_joined)),
             )
@@ -95,14 +99,17 @@ async def start_handler(client: Client, message: Message):
     mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
     uname   = f"@{user.username}" if user.username else "no username"
 
-    # ── Get user language (cached from save_user or MongoDB) ──────────────────
-    user_lang = await get_user_lang(user.id)
-
     # ── One-time Privacy Notice ────────────────────────────────────────────────
     user_doc = await users_col.find_one({"user_id": user.id}) or {}
     if not user_doc.get("is_notified"):
         await message.reply_text(
-            get_string("privacy_notice", lang=user_lang),
+            "ℹ️ <b>Privacy Notice</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "By using this bot you agree that:\n\n"
+            "• Your Telegram ID and usage data are stored.\n"
+            "• Messages may be relayed to admins for support.\n"
+            "• Data is used solely to provide bot services.\n\n"
+            "<i>This notice is shown only once.</i>",
             parse_mode=HTML,
             disable_notification=True,
         )
@@ -145,8 +152,14 @@ async def start_handler(client: Client, message: Message):
                     {"user_id": ref_id},
                     {"$set": {"points": new_points, "ref_count": new_rc}},
                 )
-                ref_lang = await get_user_lang(ref_id)
-                notif    = get_string("referral_notif", lang=ref_lang, pts=10, total=new_points)
+                notif = (
+                    "🎉 <b>New Referral Joined!</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "Congratulations! Someone just joined using your link.\n\n"
+                    f"💰 You earned: <b>+10 Points</b>\n"
+                    f"⭐ Current Balance: <b>{new_points}</b>\n\n"
+                    "Keep sharing to earn more! 🚀"
+                )
                 asyncio.create_task(bot_api("sendMessage", {
                     "chat_id":    ref_id,
                     "text":       notif,
@@ -172,9 +185,44 @@ async def start_handler(client: Client, message: Message):
                 "chat_id":    grp_chat_id,
                 "message_id": grp_msg_id,
             }))
-        welcome_msg = get_string("welcome_joined", lang=user_lang, name=name)
+        welcome_msg = (
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "✨🎬  𝗪𝗘𝗟𝗖𝗢𝗠𝗘 🎬✨\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            f"🎉 Congrats <b>{name}</b>! You're officially in! 🎊\n\n"
+            "You are now a verified member of our\n"
+            "Video Community 🎥\n\n"
+            "🔥 To watch videos use:\n"
+            "👉 /video\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "📜 GROUP RULES\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "✅ Be respectful to all members\n"
+            "✅ No spam or self-promotion\n"
+            "✅ No illegal content\n"
+            "✅ Follow admin instructions\n"
+            "⚠️ Rule violation = Instant remove\n"
+            "━━━━━━━━━━━━━━━━━━━"
+        )
     else:
-        welcome_msg = get_string("welcome_start", lang=user_lang, name=name)
+        welcome_msg = (
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "✨🎬  𝗪𝗘𝗟𝗖𝗢𝗠𝗘 🎬✨\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            f"👑 Welcome <b>{name}</b>! 👑\n"
+            "You are now a member of our Video Community 🎥\n\n"
+            "🔥 To watch videos use:\n"
+            "👉 /video\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "📜 RULES\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "✅ Be respectful\n"
+            "✅ No spam\n"
+            "✅ No illegal content\n"
+            "✅ Follow admin rules\n"
+            "⚠️ Rule violation = Instant remove\n"
+            "━━━━━━━━━━━━━━━━━━━"
+        )
 
     _share_text = (
         "░▒▓█ 🔥 DIAMOND BOT ACCESS 🔥 █▓▒░\n\n"
@@ -216,28 +264,33 @@ async def status_callback(client: Client, cq: CallbackQuery):
 
     last_daily = (doc or {}).get("last_daily")
     now        = datetime.utcnow()
-    lang       = await get_user_lang(user_id)
 
     if last_daily and (now - last_daily).total_seconds() < 86400:
         rem_secs   = 86400 - int((now - last_daily).total_seconds())
         hrs, r     = divmod(rem_secs, 3600)
-        daily_line = get_string("daily_claimed", lang=lang, hrs=hrs, mins=r // 60)
+        daily_line = f"📅 Daily Bonus: claimed (next in {hrs}h {r // 60}m)"
     else:
-        daily_line = get_string("daily_available", lang=lang)
+        daily_line = "📅 Daily Bonus: available ✅  →  /daily"
 
     rank      = get_rank(ref_count)
     status    = get_status(points)
     ref_link  = f"https://t.me/{bot_uname}?start={user_id}"
 
     await cq.edit_message_text(
-        get_string(
-            "status_profile", lang=lang,
-            user_id=user_id, joined=joined_str,
-            points=points, refs=ref_count,
-            rank=rank, status=status,
-            vid_today=vid_count, vid_limit=DAILY_VIDEO_LIMIT,
-            daily_line=daily_line, ref_link=ref_link,
-        ),
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "👤 <b>MY PROFILE</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"🆔 ID       : {user_id}\n"
+        f"📅 Joined   : {joined_str}\n\n"
+        "📊 STATISTICS:\n"
+        f"💰 Points   : {points}\n"
+        f"👥 Referrals: {ref_count}\n"
+        f"🏅 Rank     : {rank}\n"
+        f"✨ Status   : {status}\n\n"
+        f"📹 Videos Today: {vid_count}/{DAILY_VIDEO_LIMIT}\n"
+        f"{daily_line}\n\n"
+        f"🔗 Referral Link:\n{ref_link}\n"
+        "━━━━━━━━━━━━━━━━━━━",
         parse_mode=HTML,
     )
     await cq.answer()
@@ -246,8 +299,20 @@ async def status_callback(client: Client, cq: CallbackQuery):
 @app.on_message(filters.command("help") & filters.private)
 async def help_handler(client: Client, message: Message):
     is_admin  = message.from_user.id in ADMIN_IDS
-    user_lang = await get_user_lang(message.from_user.id)
-    user_text = get_string("help_user", lang=user_lang)
+    user_text = (
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "📋 <b>COMMANDS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n\n"
+        "👤 YOUR COMMANDS:\n"
+        "/start  — Register & get started\n"
+        "/video  — 🎬 Get a random video\n"
+        "/daily  — 📅 Claim daily +5 points\n"
+        "/help   — 📋 Show this message\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "💡 TIP: Use /video every day for new content!\n"
+        "Invite friends with /start to earn points.\n"
+        "━━━━━━━━━━━━━━━━━━━"
+    )
 
     admin_text = (
         "━━━━━━━━━━━━━━━━━━━\n"
@@ -362,8 +427,10 @@ async def help_handler(client: Client, message: Message):
         "/setprice [pkg] [price]      — Set package price\n"
         "/upgrade [user] [pkg]        — Upgrade user premium\n\n"
         "🏷️ AUTO TAGGING:\n"
-        "/tag [text]                  — Tag users\n"
-        "/tagall [text]               — Tag all users\n\n"
+        "/taggroup [msg]              — Tag all group members (batches of 4)\n"
+        "/tagall [msg]                — Alias for /taggroup\n"
+        "/tag @user                   — Quick-tag specific users\n"
+        "/stoptag                     — Cancel active tagging\n\n"
         "📅 SCHEDULED TASKS:\n"
         "/schedule                    — View scheduled broadcasts\n\n"
         "📋 GROUPS MANAGEMENT:\n"
@@ -429,7 +496,7 @@ async def help_handler(client: Client, message: Message):
             "/packages  /setprice  /buypremium  /mypremium\n"
             "/premiumlist  /profile  /revokepremium  /upgrade\n\n"
             "🏷️ AUTO TAG:\n"
-            "/tag [text]  /tagall [text]  /taggroup [gid] [msg]\n\n"
+            "/taggroup [msg]  /tagall [msg]  /tag @user  /stoptag\n\n"
             "📅 SCHEDULE:\n"
             "/schedule\n\n"
             "📋 GROUPS:\n"
@@ -450,12 +517,17 @@ async def daily_handler(client: Client, message: Message):
     from datetime import timedelta
     user_id = message.from_user.id
     now     = datetime.utcnow()
-    lang    = await get_user_lang(user_id)
 
     doc = await users_col.find_one({"user_id": user_id})
 
     if (doc or {}).get("bot_banned"):
-        await message.reply_text(get_string("video_banned", lang=lang), parse_mode=HTML)
+        await message.reply_text(
+            "🚫 <b>Access Restricted</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Your access to this bot has been\n"
+            "suspended by the admin.",
+            parse_mode=HTML,
+        )
         return
 
     last_daily = (doc or {}).get("last_daily")
@@ -465,7 +537,10 @@ async def daily_handler(client: Client, message: Message):
         hrs, rem  = divmod(int(remaining.total_seconds()), 3600)
         mins      = rem // 60
         await message.reply_text(
-            get_string("daily_already_claimed", lang=lang, hrs=hrs, mins=mins),
+            "⏳ <b>Already Claimed Today</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📅 Daily bonus already collected.\n\n"
+            f"🕐 Next claim in: <b>{hrs}h {mins}m</b>",
             parse_mode=HTML,
         )
         return
@@ -483,43 +558,15 @@ async def daily_handler(client: Client, message: Message):
     )
 
     await message.reply_text(
-        get_string("daily_success", lang=lang, total=new_points, rank=rank, status=status),
+        "🎉 <b>Daily Bonus Claimed!</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📅 Check-in Reward:  <b>+5 Points</b>\n"
+        f"💰 New Balance:  <b>{new_points} Points</b>\n"
+        f"🏅 Rank:  <b>{rank}</b>\n"
+        f"✨ Status:  <b>{status}</b>\n\n"
+        "🔄 Come back in 24 hours!",
         parse_mode=HTML,
     )
     print(f"[DAILY] user={user_id} claimed +5 pts → total={new_points}")
 
 
-# ── /lang — User Language Selection ──────────────────────────────────────────
-
-@app.on_message(filters.command("lang") & filters.private)
-async def lang_handler(client: Client, message: Message):
-    """Show language selection menu."""
-    user_id  = message.from_user.id
-    cur_lang = await get_user_lang(user_id)
-    cur_name = LANG_NAMES.get(cur_lang, cur_lang)
-
-    text = get_string("lang_current", lang=cur_lang, lang_name=cur_name)
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("English 🇬🇧",  callback_data="setlang:en"),
-            InlineKeyboardButton("বাংলা 🇧🇩",    callback_data="setlang:bn"),
-            InlineKeyboardButton("العربية 🇸🇦",  callback_data="setlang:ar"),
-        ]
-    ])
-    await message.reply_text(text, parse_mode=HTML, reply_markup=keyboard)
-
-
-@app.on_callback_query(filters.regex(r"^setlang:(en|bn|ar)$"))
-async def setlang_callback(client: Client, cq: CallbackQuery):
-    """Handle language button selection."""
-    user_id  = cq.from_user.id
-    new_lang = cq.data.split(":")[1]
-
-    success = await set_user_lang(user_id, new_lang)
-    if success:
-        confirm = get_string("lang_set_success", lang=new_lang)
-        await cq.edit_message_text(confirm, parse_mode=HTML)
-    else:
-        await cq.answer("❌ Invalid language.", show_alert=True)
-    await cq.answer()

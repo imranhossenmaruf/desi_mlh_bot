@@ -78,12 +78,55 @@ async def bc_select_all(client: Client, cq: CallbackQuery):
 
     await cq.edit_message_text(
         "✍️ <b>Create Your Broadcast Post</b>\n\n"
+        "🎯 Audience: <b>ALL</b> (Private Users + Groups)\n\n"
         "Send the message you want to broadcast.\n"
         "It can be text, photo, video, file, sticker, or a forwarded channel post.\n\n"
         "Type /cancel to cancel the operation.",
         parse_mode=HTML,
     )
-    await cq.answer("✅ All users selected")
+    await cq.answer("✅ All Users + Groups selected")
+
+
+@app.on_callback_query(filters.regex("^bc_private$") & admin_filter)
+async def bc_private_cb(client: Client, cq: CallbackQuery):
+    session = broadcast_sessions.get(cq.from_user.id)
+    if not session:
+        return await cq.answer("No active session.", show_alert=True)
+
+    session["audience"]   = "private"
+    session["join_after"] = None
+    session["state"]      = STATE_CONTENT
+
+    await cq.edit_message_text(
+        "✍️ <b>Create Your Broadcast Post</b>\n\n"
+        "🎯 Audience: <b>PRIVATE</b> (Users in private chat only)\n\n"
+        "Send the message you want to broadcast.\n"
+        "It can be text, photo, video, file, sticker, or a forwarded channel post.\n\n"
+        "Type /cancel to cancel the operation.",
+        parse_mode=HTML,
+    )
+    await cq.answer("✅ Private users selected")
+
+
+@app.on_callback_query(filters.regex("^bc_groups$") & admin_filter)
+async def bc_groups_cb(client: Client, cq: CallbackQuery):
+    session = broadcast_sessions.get(cq.from_user.id)
+    if not session:
+        return await cq.answer("No active session.", show_alert=True)
+
+    session["audience"]   = "groups"
+    session["join_after"] = None
+    session["state"]      = STATE_CONTENT
+
+    await cq.edit_message_text(
+        "✍️ <b>Create Your Broadcast Post</b>\n\n"
+        "🎯 Audience: <b>GROUPS</b> (All managed groups)\n\n"
+        "Send the message you want to broadcast.\n"
+        "It can be text, photo, video, file, sticker, or a forwarded channel post.\n\n"
+        "Type /cancel to cancel the operation.",
+        parse_mode=HTML,
+    )
+    await cq.answer("✅ All groups selected")
 
 
 @app.on_callback_query(filters.regex("^bc_join_after$") & admin_filter)
