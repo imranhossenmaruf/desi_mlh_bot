@@ -246,7 +246,7 @@ router.post("/github/push", async (req, res) => {
       `git -C "${BOT_REPO_DIR}" commit -m "${parsedBody.data.commitMessage.replace(/"/g, '\\"')}"`,
       { stdio: "pipe" }
     );
-    execSync(`git -C "${BOT_REPO_DIR}" push origin ${state.branch}`, { stdio: "pipe", timeout: 60000 });
+    execSync(`git -C "${BOT_REPO_DIR}" push origin ${state.branch} --force`, { stdio: "pipe", timeout: 60000 });
 
     const now = new Date().toISOString();
     writeState({ ...state, lastPush: now });
