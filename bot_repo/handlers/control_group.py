@@ -13,7 +13,7 @@ Control Group কমান্ড:
   /groupstats                     — বট পরিসংখ্যান
   /sendall [msg]                  — সব গ্রুপে broadcast
   /sendto                         — নির্দিষ্ট গ্রুপে মেসেজ
-  /taggroup [chat_id] [msg]       — গ্রুপের সবাইকে invisible tag
+  /taggroup [chat_id] [msg]       — tag all group members (visible, batch=4, 3s delay)
   /protect [gid] forward|links|spam on|off — Protection সেট
   /protections                    — সব গ্রুপের protection
   /kw add|del|list|clear          — Keyword auto-reply
@@ -40,7 +40,7 @@ _monitor_col = db["monitor_group_settings"]
 # ── In-memory sessions ──────────────────────────────────────────────────────────
 _ctrl_sessions: dict[int, dict] = {}
 
-ZWNJ = "\u200c"  # Invisible character for tag mentions
+
 
 
 # ── Core helpers ────────────────────────────────────────────────────────────────
@@ -390,9 +390,9 @@ CTRL_HELP_TEXT = (
     "  /sendall (reply করুন)                — reply করা মেসেজ সব গ্রুপে\n"
     "  /sendto                              — নির্দিষ্ট গ্রুপ বেছে নিন\n"
     "  /sendto [chat_id] [msg]              — সরাসরি ID দিয়ে পাঠান\n\n"
-    "🏷️ <b>Invisible Tag (ZWNJ):</b>\n"
-    "  /taggroup [gid] [msg]                — গ্রুপের সবাইকে invisible tag + বাটন\n"
-    "  /tagall [gid] [msg]                  — গ্রুপের সবাইকে invisible tag + বাটন\n"
+    "🏷️ <b>Tag Commands:</b>\n"
+    "  /taggroup [gid] [msg]                — গ্রুপের সবাইকে visible mention + button\n"
+    "  /tagall [gid] [msg]                  — গ্রুপের সবাইকে visible mention + button\n"
     "  /cancel                              — active tag session বাতিল করুন\n"
     "  বাটন format: <code>Text | https://url</code> (একাধিক লাইনে)\n\n"
     "🎬 <b>Video কমান্ড:</b>\n"
@@ -959,7 +959,7 @@ async def ctrl_addbtn_cmd(client: Client, message: Message):
     asyncio.create_task(_auto_del(m, 15))
 
 
-# ── /taggroup — Session-based invisible tag with button support ───────────────────
+# ── /taggroup — Session-based visible mention tag with button support ───────────────────
 
 _taggroup_sessions: dict[int, dict] = {}   # uid → session
 
@@ -1069,7 +1069,7 @@ async def _show_taggroup_preview(message: Message, uid: int):
     kb = await _tag_quick_kb("tgrp", uid, bool(btns))
 
     m = await message.reply_text(
-        f"🏷️ <b>Invisible Taggroup</b>\n"
+        f"🏷️ <b>Tag Group</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📍 Group: <b>{_html.escape(title)}</b>  <code>{gid}</code>\n"
         f"💬 মেসেজ:\n{preview_txt}"
@@ -1161,7 +1161,7 @@ async def ctrl_taggroup_cb(client: Client, cq: CallbackQuery):
     # action == "yes" — tag শুরু করো
     _taggroup_sessions.pop(uid, None)
     await cq.answer("🏷️ Tagging শুরু হচ্ছে…")
-    await cq.edit_message_text("⏳ <b>Invisible Tagging চলছে…</b>", parse_mode=HTML)
+    await cq.edit_message_text("⏳ <b>Tagging in progress…</b>", parse_mode=HTML)
 
     gid     = sess["gid"]
     msg_txt = sess.get("msg_txt", "")
@@ -1172,21 +1172,23 @@ async def ctrl_taggroup_cb(client: Client, cq: CallbackQuery):
     tagged      = 0
     chunk       = []
     chunks_sent = 0
-    ZWS         = "\u200b"   # Zero-width space — Telegram accepts as non-empty
+    BATCH_SIZE  = 4      # 4 visible mentions per message (TOS compliant)
+    BATCH_DELAY = 3.0    # 3-second mandatory delay between batches
 
     try:
         async for member in client.get_chat_members(gid):
             u = member.user
             if u.is_bot or u.is_deleted:
                 continue
-            chunk.append(f'<a href="tg://user?id={u.id}">{ZWS}</a>')
+            name = (u.first_name or "").strip() or "Member"
+            chunk.append(f'<a href="tg://user?id={u.id}">{name}</a>')
             tagged += 1
 
-            if len(chunk) >= 8:
-                # First chunk carries the message text; rest get ZWS as text
-                prefix  = msg_txt if chunks_sent == 0 else ZWS
-                payload = prefix + "".join(chunk)
-                params  = {"chat_id": gid, "text": payload, "parse_mode": "HTML"}
+            if len(chunk) >= BATCH_SIZE:
+                mentions = "  ".join(chunk)
+                prefix   = f"{msg_txt}\n\n" if (chunks_sent == 0 and msg_txt) else ""
+                payload  = prefix + mentions
+                params   = {"chat_id": gid, "text": payload, "parse_mode": "HTML"}
                 if kb_json and chunks_sent == 0:
                     params["reply_markup"] = kb_json
                 try:
@@ -1198,19 +1200,19 @@ async def ctrl_taggroup_cb(client: Client, cq: CallbackQuery):
                 except Exception:
                     pass
                 chunk = []
-                await asyncio.sleep(1)
+                await asyncio.sleep(BATCH_DELAY)
 
         if chunk:
-            prefix  = msg_txt if chunks_sent == 0 else ZWS
-            payload = prefix + "".join(chunk)
-            params  = {"chat_id": gid, "text": payload, "parse_mode": "HTML"}
+            mentions = "  ".join(chunk)
+            prefix   = f"{msg_txt}\n\n" if (chunks_sent == 0 and msg_txt) else ""
+            payload  = prefix + mentions
+            params   = {"chat_id": gid, "text": payload, "parse_mode": "HTML"}
             if kb_json and chunks_sent == 0:
                 params["reply_markup"] = kb_json
             try:
                 await bot_api("sendMessage", params)
             except Exception:
                 pass
-
     except Exception as err:
         await cq.message.edit_text(f"❌ Error: <code>{err}</code>", parse_mode=HTML)
         return
@@ -1840,7 +1842,7 @@ async def ctrl_warn_toggle_cmd(client: Client, message: Message):
         await message.reply_text(f"❌ ত্রুটি: <code>{e}</code>", parse_mode=HTML)
 
 
-# ── /tagall [gid] [msg] — Control Group থেকে invisible tag ──────────────────────
+# ── /tagall [gid] [msg] — Control Group থেকে visible mention tag ──────────────────────
 # (ইতিমধ্যে /taggroup আছে। /tagall এখন control group থেকেও কাজ করবে।)
 
 _tagall_ctrl_sessions: dict[int, dict] = {}
@@ -1848,7 +1850,7 @@ _tagall_ctrl_sessions: dict[int, dict] = {}
 
 @app.on_message(filters.command("tagall") & filters.group, group=1)
 async def ctrl_tagall_cmd(client: Client, message: Message):
-    """Control Group থেকে /tagall [gid] [msg] — invisible tag করে, বাটন যোগের সুবিধাসহ।"""
+    """Control Group থেকে /tagall [gid] [msg] — visible mention tag করে, বাটন যোগের সুবিধাসহ।"""
     # শুধু control group-এ কাজ করবে এই ব্লক
     if not await is_control_group(message.chat.id):
         return
@@ -1914,7 +1916,7 @@ async def _show_tagall_confirm(message: Message, uid: int):
     kb = await _tag_quick_kb("ctag", uid, bool(btns))
 
     m = await message.reply_text(
-        f"🏷️ <b>Invisible Tagall</b>\n"
+        f"🏷️ <b>Tag All</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📍 Group: <b>{_html.escape(title)}</b>  <code>{gid}</code>\n"
         f"💬 মেসেজ:\n{preview_txt}"
@@ -2005,7 +2007,7 @@ async def ctrl_tagall_cb(client: Client, cq: CallbackQuery):
     # action == "yes" — tagall শুরু করো
     _tagall_ctrl_sessions.pop(uid, None)
     await cq.answer("🏷️ Tagging শুরু হচ্ছে…")
-    await cq.edit_message_text("⏳ <b>Invisible Tagging চলছে…</b>", parse_mode=HTML)
+    await cq.edit_message_text("⏳ <b>Tagging in progress…</b>", parse_mode=HTML)
 
     gid      = session["gid"]
     msg_txt  = session.get("msg_txt", "")
@@ -2015,20 +2017,23 @@ async def ctrl_tagall_cb(client: Client, cq: CallbackQuery):
     tagged      = 0
     chunk       = []
     chunks_sent = 0
-    ZWS         = "\u200b"   # Zero-width space — Telegram accepts as non-empty
+    BATCH_SIZE  = 4      # 4 visible mentions per message (TOS compliant)
+    BATCH_DELAY = 3.0    # 3-second mandatory delay between batches
 
     try:
         async for member in client.get_chat_members(gid):
             u = member.user
             if u.is_bot or u.is_deleted:
                 continue
-            chunk.append(f'<a href="tg://user?id={u.id}">{ZWS}</a>')
+            name = (u.first_name or "").strip() or "Member"
+            chunk.append(f'<a href="tg://user?id={u.id}">{name}</a>')
             tagged += 1
 
-            if len(chunk) >= 8:
-                prefix  = msg_txt if chunks_sent == 0 else ZWS
-                payload = prefix + "".join(chunk)
-                params  = {"chat_id": gid, "text": payload, "parse_mode": "HTML"}
+            if len(chunk) >= BATCH_SIZE:
+                mentions = "  ".join(chunk)
+                prefix   = f"{msg_txt}\n\n" if (chunks_sent == 0 and msg_txt) else ""
+                payload  = prefix + mentions
+                params   = {"chat_id": gid, "text": payload, "parse_mode": "HTML"}
                 if kb_json and chunks_sent == 0:
                     params["reply_markup"] = kb_json
                 try:
@@ -2040,89 +2045,16 @@ async def ctrl_tagall_cb(client: Client, cq: CallbackQuery):
                 except Exception:
                     pass
                 chunk = []
-                await asyncio.sleep(1)
+                await asyncio.sleep(BATCH_DELAY)
 
         if chunk:
-            prefix  = msg_txt if chunks_sent == 0 else ZWS
-            payload = prefix + "".join(chunk)
-            params  = {"chat_id": gid, "text": payload, "parse_mode": "HTML"}
+            mentions = "  ".join(chunk)
+            prefix   = f"{msg_txt}\n\n" if (chunks_sent == 0 and msg_txt) else ""
+            payload  = prefix + mentions
+            params   = {"chat_id": gid, "text": payload, "parse_mode": "HTML"}
             if kb_json and chunks_sent == 0:
                 params["reply_markup"] = kb_json
             try:
                 await bot_api("sendMessage", params)
             except Exception:
                 pass
-
-        try:
-            chat_title = session.get("grp_title", str(gid))
-            await cq.message.edit_text(
-                f"✅ <b>Tagging সম্পন্ন!</b>\n"
-                f"👥 Tagged: <b>{tagged}</b> জন\n"
-                f"📍 Group: <b>{chat_title}</b>",
-                parse_mode=HTML,
-            )
-        except Exception:
-            pass
-
-    except Exception as e:
-        try:
-            await cq.message.edit_text(f"❌ Tagging ব্যর্থ: <code>{e}</code>", parse_mode=HTML)
-        except Exception:
-            pass
-
-
-# ── Control Group session handler — tagall button input ──────────────────────────
-
-# group=11 handler removed — tagall button session merged into _ctrl_session_handler (group=10)
-
-
-# ── /setinboxgroup — Control Group থেকে Inbox Group সেট করা ─────────────────────
-
-@app.on_message(filters.command("setinboxgroup") & filters.group, group=1)
-async def ctrl_set_inbox_group_cmd(client: Client, message: Message):
-    if not await is_control_group(message.chat.id):
-        return
-    if not await _is_ctrl_admin(client, message):
-        return
-
-    args = message.command[1:]
-    if not args or not args[0].lstrip("-").isdigit():
-        from handlers.inbox import _get_inbox_group
-        current = await _get_inbox_group(client)
-        if current:
-            m = await message.reply_text(
-                f"📥 <b>Inbox Group</b>\n"
-                f"✅ বর্তমান: <code>{current}</code>\n\n"
-                f"পরিবর্তন করতে: <code>/setinboxgroup -100xxxxxxxxxx</code>",
-                parse_mode=HTML,
-            )
-        else:
-            m = await message.reply_text(
-                "📥 <b>Inbox Group সেট নেই</b>\n"
-                "ব্যবহার: <code>/setinboxgroup -100xxxxxxxxxx</code>",
-                parse_mode=HTML,
-            )
-        asyncio.create_task(_auto_del(m, 20))
-        return
-
-    gid = int(args[0])
-
-    from handlers.inbox import _set_inbox_group
-    from helpers import bot_api as _bapi
-    await _set_inbox_group(gid)
-
-    test_res = await _bapi("sendMessage", {
-        "chat_id":    gid,
-        "text":       "✅ <b>Inbox Group সংযুক্ত হয়েছে!</b>\nUser মেসেজ এখানে আসবে। Reply করে respond করুন।",
-        "parse_mode": "HTML",
-    })
-    ok = test_res.get("ok", False)
-    status = "🟢 Test message সফল!" if ok else f"⚠️ Group-এ পাঠানো যায়নি: {test_res.get('description', '')}"
-
-    await message.reply_text(
-        f"{'✅' if ok else '⚠️'} <b>Inbox Group {'সেট হয়েছে' if ok else 'সেভ হয়েছে (পাঠানো যায়নি)'}!</b>\n"
-        f"📥 ID: <code>{gid}</code>\n{status}",
-        parse_mode=HTML,
-    )
-
-
