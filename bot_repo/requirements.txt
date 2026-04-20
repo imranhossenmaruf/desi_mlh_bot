@@ -1,0 +1,8 @@
+python-dotenv
+pyrogram
+tgcrypto
+motor
+pymongo
+aiohttp
+deep-translator
+deep-translator
