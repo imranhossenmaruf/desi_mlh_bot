@@ -219,6 +219,14 @@ router.post("/github/push", async (req, res) => {
       // ignore config errors
     }
 
+    // Fetch and merge remote changes before committing (avoid push rejection)
+    try {
+      execSync(`git -C "${BOT_REPO_DIR}" fetch origin ${state.branch}`, { stdio: "pipe", timeout: 30000 });
+      execSync(`git -C "${BOT_REPO_DIR}" merge origin/${state.branch} --no-edit --strategy-option=ours`, { stdio: "pipe" });
+    } catch {
+      // If merge fails, continue — local changes will push successfully on force
+    }
+
     execSync(`git -C "${BOT_REPO_DIR}" add -A`, { stdio: "pipe" });
 
     // Check if there's anything to commit
