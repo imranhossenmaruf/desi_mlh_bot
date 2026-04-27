@@ -138,3 +138,10 @@ PACKAGES = {
 
 PACKAGE_ORDER = ["starter", "basic", "standard", "pro", "vip", "elite"]
 PAYMENT_METHODS: dict = {}
+
+# ── REPLIES ──────────────────────────────────────────────────────────────────
+# Maps trigger text → reply text. Used by handlers/misc.py auto-reply logic.
+# Empty by default (no auto-replies) so the import never fails. Add entries
+# here to enable simple keyword auto-replies, e.g.
+#   REPLIES = {"hi": "Hello!", "rules": "Please read /rules"}
+REPLIES: dict = {}

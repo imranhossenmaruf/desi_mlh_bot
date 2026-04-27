@@ -2058,3 +2058,22 @@ async def ctrl_tagall_cb(client: Client, cq: CallbackQuery):
                 await bot_api("sendMessage", params)
             except Exception:
                 pass
+        # ── All members tagged ──
+        try:
+            await cq.message.reply_text(
+                f"✅ Tagged <b>{tagged}</b> members in {chunks_sent} batches.",
+                parse_mode=HTML,
+            )
+        except Exception:
+            pass
+
+    except Exception as e:
+        # Outer safety net — surface any unexpected error to the admin instead
+        # of silently crashing the handler.
+        try:
+            await cq.message.reply_text(
+                f"❌ Tagall failed: <code>{e}</code>",
+                parse_mode=HTML,
+            )
+        except Exception:
+            pass
