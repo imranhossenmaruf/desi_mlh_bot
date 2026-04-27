@@ -171,69 +171,36 @@ async def relay_group_msg_to_monitor(client: Client, message: Message):
         sender_link = f'<a href="tg://user?id={sender.id}">{safe_sender}</a>'
         kind = _kind_of(message)
 
-        # ── Path 1: text → ONE message with header + content (no forward) ─────
-        if message.text:
-            content = html.escape(message.text[:1500])
-            text = (
-                f"{header}\n"
-                f"👤 {sender_link}\n"
-                f"💬 {content}"
-            )
-            res = await bot_api("sendMessage", {
-                "chat_id": monitor_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            })
-            if not res.get("ok"):
-                # Fall back to plain text so the source group is STILL shown
-                # even if HTML parsing fails for any reason.
-                print(f"[MONITOR_RELAY] HTML send failed: {res.get('description')}")
-                plain = (
-                    f"📍 GROUP: {chat_title} | 🆔 {chat_id}\n"
-                    f"👤 {sender_name}\n"
-                    f"💬 {message.text[:1500]}"
-                )
-                res = await bot_api("sendMessage", {
-                    "chat_id": monitor_id,
-                    "text": plain,
-                    "disable_web_page_preview": True,
-                })
-            if res.get("ok"):
-                relay_msg_id = res["result"]["message_id"]
-                await _monitor_relay_col.insert_one({
-                    "monitor_msg_id": relay_msg_id,
-                    "original_chat_id": chat_id,
-                    "original_msg_id": message.id,
-                    "monitor_group_id": monitor_id,
-                    "sender_id": sender.id,
-                    "chat_title": chat_title,
-                    "batched": False,
-                })
-            return
-
-        # ── Path 2: media → header THEN forward ───────────────────────────────
-        text = (
+        # ── STEP 1: send a SEPARATE header message FIRST ──────────────────────
+        # This message says "এই গ্রুপ থেকে এসেছে" (group name + ID + sender)
+        # and is its own bubble in the Monitor Group, BEFORE the forwarded
+        # message itself. Always sent regardless of message type.
+        header_text = (
             f"{header}\n"
             f"👤 {sender_link}\n"
-            f"📎 <b>{kind}</b>"
+            f"📨 <b>{kind}</b> ↓"
         )
         head_res = await bot_api("sendMessage", {
             "chat_id": monitor_id,
-            "text": text,
+            "text": header_text,
             "parse_mode": "HTML",
+            "disable_web_page_preview": True,
         })
         if not head_res.get("ok"):
-            # Plain-text fallback so the source is NEVER lost.
+            # Plain-text fallback so the source group is NEVER lost, even if
+            # HTML parsing fails (special chars in title/name, etc.)
             print(f"[MONITOR_RELAY] HTML header failed: {head_res.get('description')}")
             await bot_api("sendMessage", {
                 "chat_id": monitor_id,
                 "text": (
                     f"📍 GROUP: {chat_title} | 🆔 {chat_id}\n"
                     f"👤 {sender_name}\n"
-                    f"📎 {kind}"
+                    f"📨 {kind} ↓"
                 ),
+                "disable_web_page_preview": True,
             })
+
+        # ── STEP 2: forward the ORIGINAL message right after the header ───────
         fwd = await bot_api("forwardMessage", {
             "chat_id": monitor_id,
             "from_chat_id": chat_id,
@@ -249,6 +216,16 @@ async def relay_group_msg_to_monitor(client: Client, message: Message):
                 "chat_title": chat_title,
                 "batched": False,
             })
+        else:
+            # If forwarding fails (e.g. message deleted), at least show the
+            # text content as a fallback so nothing is lost.
+            print(f"[MONITOR_RELAY] forward failed: {fwd.get('description')}")
+            if message.text:
+                await bot_api("sendMessage", {
+                    "chat_id": monitor_id,
+                    "text": message.text[:3500],
+                    "disable_web_page_preview": True,
+                })
 
     except Exception as e:
         print(f"[MONITOR_RELAY] Error: {e}")
