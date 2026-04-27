@@ -1,0 +1,12 @@
+node_modules
+artifacts
+lib
+scripts
+.local
+*.tsbuildinfo
+pnpm-lock.yaml
+pnpm-workspace.yaml
+tsconfig.json
+tsconfig.base.json
+package.json
+.npmrc

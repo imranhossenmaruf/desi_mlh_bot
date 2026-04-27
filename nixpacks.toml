@@ -1,0 +1,18 @@
+# Tell Railway/Nixpacks this is a Python project living in bot_repo/.
+# The Replit monorepo wrapper at the root (package.json, pnpm-workspace,
+# tsconfig, etc.) is for local dev only and must be ignored by the
+# Railway build.
+
+providers = ["python"]
+
+[phases.setup]
+nixPkgs = ["python311", "gcc", "pkg-config"]
+
+[phases.install]
+cmds = [
+  "python -m pip install --upgrade pip",
+  "pip install -r bot_repo/requirements.txt",
+]
+
+[start]
+cmd = "cd bot_repo && python main.py"
