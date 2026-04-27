@@ -362,6 +362,20 @@ async def video_handler_group(client: Client, message: Message):
     if not video_on:
         return
 
+    # ── Per-group auto-delete সময় (মিনিটে) ────────────────────────────────
+    # group_settings.video_delete_minutes না থাকলে default 25 মিনিট।
+    raw_minutes  = grp_settings.get("video_delete_minutes", 25)
+    try:
+        delete_minutes = int(raw_minutes)
+    except (TypeError, ValueError):
+        delete_minutes = 25
+    # 1 মিনিট থেকে 24 ঘণ্টার মধ্যে clamp করুন।
+    if delete_minutes < 1:
+        delete_minutes = 1
+    elif delete_minutes > 1440:
+        delete_minutes = 1440
+    delete_seconds = delete_minutes * 60
+
     # ── ব্যবহারকারীর কমান্ড মেসেজ ডিলিট করুন ──────────────────────────────
     try:
         await message.delete()
@@ -452,7 +466,7 @@ async def video_handler_group(client: Client, message: Message):
         f"🎬 {mention}-এর জন্য ভিডিও\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{usage_line}\n"
-        "⏳ ভিডিওটি ২৫ মিনিটে মুছে যাবে।\n"
+        f"⏳ ভিডিওটি {delete_minutes} মিনিটে মুছে যাবে।\n"
         "━━━━━━━━━━━━━━━━━━━━━━"
     )
 
@@ -521,9 +535,9 @@ async def video_handler_group(client: Client, message: Message):
         {"user_id": user_id, "message_id": msg_id, "sent_at": now}
     )
 
-    # ── Auto-delete the group video after 25 minutes ──────────────────────────
+    # ── Auto-delete the group video after the per-group configured time ───────
     if sent_msg_id:
-        delete_at = now + timedelta(seconds=1500)
+        delete_at = now + timedelta(seconds=delete_seconds)
         bot_token = _get_bot_token(client)
         await del_queue_col.insert_one({
             "chat_id":   chat_id,

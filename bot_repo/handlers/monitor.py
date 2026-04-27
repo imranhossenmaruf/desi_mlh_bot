@@ -2,11 +2,14 @@
 Monitor Group — relay managed group messages to the Monitor Group.
 
 Features:
-  - Shows source group name in every relayed message.
-  - Format: "📍 Source: [Group Name] | Message: [Text]"
-  - Rate Limiting: If one group sends more than 5 messages in 10 seconds,
-    that group's monitoring is paused for 1 minute automatically.
-  - Admin replies from Monitor Group are relayed back to the original group.
+  - Clear, prominent source group header (group name + group ID).
+  - Smart batching: when many messages arrive from the same group in a short
+    window, they are grouped into ONE compact summary message in the Monitor
+    Group instead of flooding it with separate messages.
+  - Rate limiting safety net: if a group keeps spamming after batching,
+    monitoring of that group is paused for 1 minute automatically.
+  - Admin replies from the Monitor Group are relayed back to the original
+    group (text reply works for both single and batched relays).
 """
 
 import asyncio
@@ -21,22 +24,39 @@ from helpers import bot_api, _auto_del, BOT_TOKEN
 
 _monitor_relay_col = db["monitor_relay_messages"]
 
-# Rate limit: max 5 messages per 10 seconds per group → pause 1 minute
-_group_msg_times:   dict[int, deque] = {}
+# ── Hard rate-limit safety net ────────────────────────────────────────────────
+# If a group sends more than _RATE_MAX messages in _RATE_WINDOW seconds, pause
+# its monitoring for _PAUSE_DURATION seconds. This is the last line of defense
+# AFTER batching, so the threshold is intentionally high.
+_group_msg_times:    dict[int, deque] = {}
 _group_paused_until: dict[int, float] = {}
-_RATE_MAX      = 5
-_RATE_WINDOW   = 10.0   # seconds
-_PAUSE_DURATION = 60.0  # seconds to pause after rate limit exceeded
+_RATE_MAX       = 20
+_RATE_WINDOW    = 10.0   # seconds
+_PAUSE_DURATION = 60.0   # seconds to pause after rate limit exceeded
+
+# ── Smart batching ────────────────────────────────────────────────────────────
+# Per-group buffer of messages waiting to be flushed. Messages are collected
+# for _BATCH_WINDOW seconds (or until _BATCH_MAX items) and then sent as ONE
+# compact summary to the Monitor Group.
+_BATCH_WINDOW = 4.0   # seconds to wait before flushing a batch
+_BATCH_MAX    = 8     # max messages per batch summary
+
+# chat_id -> {
+#   "items": [ {sender_name, sender_id, kind, content}, ... ],
+#   "chat_title": str,
+#   "task": asyncio.Task | None,
+# }
+_batch_buffers: dict[int, dict] = {}
+_batch_lock = asyncio.Lock()
 
 
 def _check_rate_limit(chat_id: int) -> bool:
     """
-    Returns True if the group is allowed through.
-    Returns False if rate-limited (pauses group for 1 minute on first violation).
+    True  → group is allowed through.
+    False → group is being rate-limited (1 min pause).
     """
     now = time.monotonic()
 
-    # Check active pause
     if now < _group_paused_until.get(chat_id, 0):
         return False
 
@@ -44,12 +64,10 @@ def _check_rate_limit(chat_id: int) -> bool:
         _group_msg_times[chat_id] = deque()
 
     times = _group_msg_times[chat_id]
-    # Drop timestamps outside the window
     while times and now - times[0] > _RATE_WINDOW:
         times.popleft()
 
     if len(times) >= _RATE_MAX:
-        # Rate exceeded — pause this group for 1 minute
         _group_paused_until[chat_id] = now + _PAUSE_DURATION
         print(f"[MONITOR] Rate limit hit for chat {chat_id} — paused {int(_PAUSE_DURATION)}s")
         return False
@@ -66,6 +84,210 @@ async def _get_monitor_id() -> int | None:
 async def _get_control_id() -> int | None:
     from handlers.control_group import get_control_group
     return await get_control_group()
+
+
+def _kind_of(message: Message) -> str:
+    if message.text:     return "text"
+    if message.photo:    return "Photo"
+    if message.video:    return "Video"
+    if message.voice:    return "Voice"
+    if message.audio:    return "Audio"
+    if message.document: return "File"
+    if message.sticker:  return "Sticker"
+    if message.animation:return "GIF"
+    return "Media"
+
+
+def _format_header(chat_title: str, chat_id: int, count: int) -> str:
+    """Big, clear source-group header that's impossible to miss."""
+    if count > 1:
+        badge = f"📨 <b>{count} new</b>"
+    else:
+        badge = "📨 <b>1 new</b>"
+    return (
+        "🔔━━━━━━━━━━━━━━━━━━━━🔔\n"
+        f"📍 <b>GROUP:</b> <b>{chat_title}</b>\n"
+        f"🆔 <code>{chat_id}</code>   |   {badge}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━"
+    )
+
+
+async def _flush_batch(chat_id: int) -> None:
+    """Send the buffered messages for a single group to the Monitor Group."""
+    await asyncio.sleep(_BATCH_WINDOW)
+
+    async with _batch_lock:
+        buf = _batch_buffers.pop(chat_id, None)
+    if not buf or not buf["items"]:
+        return
+
+    monitor_id = await _get_monitor_id()
+    if not monitor_id:
+        return
+
+    items      = buf["items"]
+    chat_title = buf["chat_title"]
+    header     = _format_header(chat_title, chat_id, len(items))
+
+    # Single-message case → relay verbatim with the new header.
+    if len(items) == 1:
+        item = items[0]
+        sender_link = f'<a href="tg://user?id={item["sender_id"]}">{item["sender_name"]}</a>'
+        relay_msg_id = None
+
+        if item["kind"] == "text":
+            text_body = item["content"][:1000]
+            formatted = (
+                f"{header}\n"
+                f"👤 {sender_link}\n"
+                f"💬 {text_body}"
+            )
+            res = await bot_api("sendMessage", {
+                "chat_id":    monitor_id,
+                "text":       formatted,
+                "parse_mode": "HTML",
+            })
+            if res.get("ok"):
+                relay_msg_id = res["result"]["message_id"]
+        else:
+            label = item["kind"]
+            head_msg = (
+                f"{header}\n"
+                f"👤 {sender_link}\n"
+                f"🗂 <b>{label}</b>"
+            )
+            await bot_api("sendMessage", {
+                "chat_id":    monitor_id,
+                "text":       head_msg,
+                "parse_mode": "HTML",
+            })
+            fwd = await bot_api("forwardMessage", {
+                "chat_id":      monitor_id,
+                "from_chat_id": chat_id,
+                "message_id":   item["msg_id"],
+            })
+            if fwd.get("ok"):
+                relay_msg_id = fwd["result"]["message_id"]
+
+        if relay_msg_id:
+            await _monitor_relay_col.insert_one({
+                "monitor_msg_id":   relay_msg_id,
+                "original_chat_id": chat_id,
+                "original_msg_id":  item["msg_id"],
+                "monitor_group_id": monitor_id,
+                "sender_id":        item["sender_id"],
+                "chat_title":       chat_title,
+                "batched":          False,
+            })
+        return
+
+    # Multi-message case → ONE compact summary with all messages bulleted.
+    lines = [header]
+    for it in items:
+        link = f'<a href="tg://user?id={it["sender_id"]}">{it["sender_name"]}</a>'
+        if it["kind"] == "text":
+            preview = it["content"].strip().replace("\n", " ")
+            if len(preview) > 140:
+                preview = preview[:140] + "…"
+            lines.append(f"• {link}: {preview}")
+        else:
+            lines.append(f"• {link}: <i>[{it['kind']}]</i>")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("ℹ️ <i>Reply to this message to respond to the group.</i>")
+    summary = "\n".join(lines)
+
+    res = await bot_api("sendMessage", {
+        "chat_id":               monitor_id,
+        "text":                  summary,
+        "parse_mode":            "HTML",
+        "disable_web_page_preview": True,
+    })
+    if res.get("ok"):
+        relay_msg_id = res["result"]["message_id"]
+        # Map the batched relay to the LAST original message so admin replies
+        # land in a sensible thread context.
+        last_item = items[-1]
+        await _monitor_relay_col.insert_one({
+            "monitor_msg_id":   relay_msg_id,
+            "original_chat_id": chat_id,
+            "original_msg_id":  last_item["msg_id"],
+            "monitor_group_id": monitor_id,
+            "sender_id":        last_item["sender_id"],
+            "chat_title":       chat_title,
+            "batched":          True,
+            "batch_size":       len(items),
+        })
+
+
+async def _enqueue_for_batch(chat_id: int, chat_title: str, item: dict) -> None:
+    """Add an item to the per-group buffer, scheduling a flush if needed."""
+    async with _batch_lock:
+        buf = _batch_buffers.get(chat_id)
+        if not buf:
+            buf = {"items": [], "chat_title": chat_title, "task": None}
+            _batch_buffers[chat_id] = buf
+
+        buf["chat_title"] = chat_title
+        buf["items"].append(item)
+
+        # Hit the cap → flush immediately.
+        if len(buf["items"]) >= _BATCH_MAX:
+            if buf["task"] and not buf["task"].done():
+                buf["task"].cancel()
+            _batch_buffers.pop(chat_id, None)
+            asyncio.create_task(_flush_now(chat_id, buf))
+            return
+
+        # Schedule a delayed flush only if one isn't already pending.
+        if buf["task"] is None or buf["task"].done():
+            buf["task"] = asyncio.create_task(_flush_batch(chat_id))
+
+
+async def _flush_now(chat_id: int, buf: dict) -> None:
+    """Immediate flush path used when the per-group cap is hit."""
+    monitor_id = await _get_monitor_id()
+    if not monitor_id:
+        return
+
+    items      = buf["items"]
+    chat_title = buf["chat_title"]
+    if not items:
+        return
+
+    header = _format_header(chat_title, chat_id, len(items))
+    lines  = [header]
+    for it in items:
+        link = f'<a href="tg://user?id={it["sender_id"]}">{it["sender_name"]}</a>'
+        if it["kind"] == "text":
+            preview = it["content"].strip().replace("\n", " ")
+            if len(preview) > 140:
+                preview = preview[:140] + "…"
+            lines.append(f"• {link}: {preview}")
+        else:
+            lines.append(f"• {link}: <i>[{it['kind']}]</i>")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("ℹ️ <i>Reply to this message to respond to the group.</i>")
+    summary = "\n".join(lines)
+
+    res = await bot_api("sendMessage", {
+        "chat_id":               monitor_id,
+        "text":                  summary,
+        "parse_mode":            "HTML",
+        "disable_web_page_preview": True,
+    })
+    if res.get("ok"):
+        relay_msg_id = res["result"]["message_id"]
+        last_item    = items[-1]
+        await _monitor_relay_col.insert_one({
+            "monitor_msg_id":   relay_msg_id,
+            "original_chat_id": chat_id,
+            "original_msg_id":  last_item["msg_id"],
+            "monitor_group_id": monitor_id,
+            "sender_id":        last_item["sender_id"],
+            "chat_title":       chat_title,
+            "batched":          True,
+            "batch_size":       len(items),
+        })
 
 
 # ── Relay group messages → Monitor Group ──────────────────────────────────────
@@ -98,66 +320,21 @@ async def relay_group_msg_to_monitor(client: Client, message: Message):
         if raw.startswith("/"):
             return
 
-        # Per-group rate limit: 5 msgs/10s → 1 min pause
         if not _check_rate_limit(chat_id):
             return
 
         chat_title  = message.chat.title or str(chat_id)
         sender_name = sender.first_name or "Unknown"
-        sender_link = f'<a href="tg://user?id={sender.id}">{sender_name}</a>'
 
-        relay_msg_id = None
+        item = {
+            "msg_id":      message.id,
+            "sender_id":   sender.id,
+            "sender_name": sender_name,
+            "kind":        _kind_of(message),
+            "content":     (message.text or message.caption or "")[:500],
+        }
 
-        if message.text:
-            content = message.text[:500]
-            # Required format: 📍 Source: [Group Name] | Message: [Text]
-            formatted = (
-                f"📍 <b>Source: {chat_title}</b> | <b>Message:</b> {content}\n"
-                f"👤 {sender_link}"
-            )
-            res = await bot_api("sendMessage", {
-                "chat_id":    monitor_id,
-                "text":       formatted,
-                "parse_mode": "HTML",
-            })
-            if res.get("ok"):
-                relay_msg_id = res["result"]["message_id"]
-        else:
-            media_type = (
-                "Photo"   if message.photo    else
-                "Video"   if message.video    else
-                "Voice"   if message.voice    else
-                "Audio"   if message.audio    else
-                "File"    if message.document else
-                "Sticker" if message.sticker  else
-                "Media"
-            )
-            header = (
-                f"📍 <b>Source: {chat_title}</b> | {media_type}\n"
-                f"👤 {sender_link}"
-            )
-            await bot_api("sendMessage", {
-                "chat_id":    monitor_id,
-                "text":       header,
-                "parse_mode": "HTML",
-            })
-            fwd = await bot_api("forwardMessage", {
-                "chat_id":      monitor_id,
-                "from_chat_id": chat_id,
-                "message_id":   message.id,
-            })
-            if fwd.get("ok"):
-                relay_msg_id = fwd["result"]["message_id"]
-
-        if relay_msg_id:
-            await _monitor_relay_col.insert_one({
-                "monitor_msg_id":   relay_msg_id,
-                "original_chat_id": chat_id,
-                "original_msg_id":  message.id,
-                "monitor_group_id": monitor_id,
-                "sender_id":        sender.id,
-                "chat_title":       chat_title,
-            })
+        await _enqueue_for_batch(chat_id, chat_title, item)
 
     except Exception as e:
         print(f"[MONITOR_RELAY] Error: {e}")
@@ -192,9 +369,13 @@ async def monitor_group_reply_handler(client: Client, message: Message):
 
         original_chat_id = mapping["original_chat_id"]
         original_msg_id  = mapping.get("original_msg_id")
+        was_batched      = bool(mapping.get("batched"))
 
         params: dict = {"chat_id": original_chat_id, "parse_mode": "HTML"}
-        if original_msg_id:
+        # For batched relays, replying to a specific original msg can be confusing
+        # (the admin replied to a summary, not a single message). Send as a fresh
+        # message in that group instead.
+        if original_msg_id and not was_batched:
             params["reply_to_message_id"] = original_msg_id
 
         result = None

@@ -53,6 +53,7 @@ async def get_group_settings(chat_id: int) -> dict:
                 "auto_reactions": False,
                 "keyword_reply": False,
             },
+            "video_delete_minutes": 25,
             "auto_approve": False,
             "log_channel": None,
             "created_at": datetime.utcnow(),
