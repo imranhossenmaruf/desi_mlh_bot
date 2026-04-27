@@ -13,6 +13,7 @@ Features:
 """
 
 import asyncio
+import html
 import time
 from collections import deque
 
@@ -99,14 +100,19 @@ def _kind_of(message: Message) -> str:
 
 
 def _format_header(chat_title: str, chat_id: int, count: int) -> str:
-    """Big, clear source-group header that's impossible to miss."""
+    """Big, clear source-group header that's impossible to miss.
+
+    HTML-escapes the title so groups with `<`, `>`, `&` in their name don't
+    cause Telegram to reject the message with a parse error.
+    """
+    safe_title = html.escape(chat_title or str(chat_id))
     if count > 1:
         badge = f"📨 <b>{count} new</b>"
     else:
         badge = "📨 <b>1 new</b>"
     return (
         "🔔━━━━━━━━━━━━━━━━━━━━🔔\n"
-        f"📍 <b>GROUP:</b> <b>{chat_title}</b>\n"
+        f"📍 <b>GROUP:</b> <b>{safe_title}</b>\n"
         f"🆔 <code>{chat_id}</code>   |   {badge}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━"
     )
@@ -161,11 +167,13 @@ async def relay_group_msg_to_monitor(client: Client, message: Message):
         sender_name = sender.first_name or "Unknown"
 
         header = _format_header(chat_title, chat_id, 1)
-        sender_link = f'<a href="tg://user?id={sender.id}">{sender_name}</a>'
+        safe_sender = html.escape(sender_name)
+        sender_link = f'<a href="tg://user?id={sender.id}">{safe_sender}</a>'
         kind = _kind_of(message)
 
+        # ── Path 1: text → ONE message with header + content (no forward) ─────
         if message.text:
-            content = message.text[:1500]
+            content = html.escape(message.text[:1500])
             text = (
                 f"{header}\n"
                 f"👤 {sender_link}\n"
@@ -177,6 +185,20 @@ async def relay_group_msg_to_monitor(client: Client, message: Message):
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             })
+            if not res.get("ok"):
+                # Fall back to plain text so the source group is STILL shown
+                # even if HTML parsing fails for any reason.
+                print(f"[MONITOR_RELAY] HTML send failed: {res.get('description')}")
+                plain = (
+                    f"📍 GROUP: {chat_title} | 🆔 {chat_id}\n"
+                    f"👤 {sender_name}\n"
+                    f"💬 {message.text[:1500]}"
+                )
+                res = await bot_api("sendMessage", {
+                    "chat_id": monitor_id,
+                    "text": plain,
+                    "disable_web_page_preview": True,
+                })
             if res.get("ok"):
                 relay_msg_id = res["result"]["message_id"]
                 await _monitor_relay_col.insert_one({
@@ -188,32 +210,45 @@ async def relay_group_msg_to_monitor(client: Client, message: Message):
                     "chat_title": chat_title,
                     "batched": False,
                 })
-        else:
-            text = (
-                f"{header}\n"
-                f"👤 {sender_link}\n"
-                f"📎 <b>{kind}</b>"
-            )
+            return
+
+        # ── Path 2: media → header THEN forward ───────────────────────────────
+        text = (
+            f"{header}\n"
+            f"👤 {sender_link}\n"
+            f"📎 <b>{kind}</b>"
+        )
+        head_res = await bot_api("sendMessage", {
+            "chat_id": monitor_id,
+            "text": text,
+            "parse_mode": "HTML",
+        })
+        if not head_res.get("ok"):
+            # Plain-text fallback so the source is NEVER lost.
+            print(f"[MONITOR_RELAY] HTML header failed: {head_res.get('description')}")
             await bot_api("sendMessage", {
                 "chat_id": monitor_id,
-                "text": text,
-                "parse_mode": "HTML",
+                "text": (
+                    f"📍 GROUP: {chat_title} | 🆔 {chat_id}\n"
+                    f"👤 {sender_name}\n"
+                    f"📎 {kind}"
+                ),
             })
-            fwd = await bot_api("forwardMessage", {
-                "chat_id": monitor_id,
-                "from_chat_id": chat_id,
-                "message_id": message.id,
+        fwd = await bot_api("forwardMessage", {
+            "chat_id": monitor_id,
+            "from_chat_id": chat_id,
+            "message_id": message.id,
+        })
+        if fwd.get("ok"):
+            await _monitor_relay_col.insert_one({
+                "monitor_msg_id": fwd["result"]["message_id"],
+                "original_chat_id": chat_id,
+                "original_msg_id": message.id,
+                "monitor_group_id": monitor_id,
+                "sender_id": sender.id,
+                "chat_title": chat_title,
+                "batched": False,
             })
-            if fwd.get("ok"):
-                await _monitor_relay_col.insert_one({
-                    "monitor_msg_id": fwd["result"]["message_id"],
-                    "original_chat_id": chat_id,
-                    "original_msg_id": message.id,
-                    "monitor_group_id": monitor_id,
-                    "sender_id": sender.id,
-                    "chat_title": chat_title,
-                    "batched": False,
-                })
 
     except Exception as e:
         print(f"[MONITOR_RELAY] Error: {e}")
