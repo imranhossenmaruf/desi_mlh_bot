@@ -50,6 +50,27 @@ _BATCH_MAX    = 8     # max messages per batch summary
 _batch_buffers: dict[int, dict] = {}
 _batch_lock = asyncio.Lock()
 
+# ── Per-group header cooldown ─────────────────────────────────────────────────
+# The "📍 GROUP: …" header is shown AT MOST ONCE per source group inside this
+# cooldown window. If the same group keeps sending messages, every message is
+# still forwarded to the Monitor Group, but the header (group name + ID + sender
+# label) is suppressed so the monitor isn't flooded with identical banners.
+# After the group is quiet for the full cooldown, the next message will again
+# get a fresh header — acting as a clear "new burst from this group" marker.
+_HEADER_COOLDOWN = 600.0   # 10 minutes per source group
+_last_header_at: dict[int, float] = {}
+
+
+def _should_send_header(chat_id: int) -> bool:
+    """Return True only if it's been ≥ _HEADER_COOLDOWN since this group's
+    last header. Updates the timestamp when returning True."""
+    now = time.monotonic()
+    last = _last_header_at.get(chat_id, 0.0)
+    if now - last >= _HEADER_COOLDOWN:
+        _last_header_at[chat_id] = now
+        return True
+    return False
+
 
 def _check_rate_limit(chat_id: int) -> bool:
     """
@@ -166,39 +187,41 @@ async def relay_group_msg_to_monitor(client: Client, message: Message):
         chat_title  = message.chat.title or str(chat_id)
         sender_name = sender.first_name or "Unknown"
 
-        header = _format_header(chat_title, chat_id, 1)
-        safe_sender = html.escape(sender_name)
-        sender_link = f'<a href="tg://user?id={sender.id}">{safe_sender}</a>'
-        kind = _kind_of(message)
-
         # ── STEP 1: send a SEPARATE header message FIRST ──────────────────────
-        # This message says "এই গ্রুপ থেকে এসেছে" (group name + ID + sender)
-        # and is its own bubble in the Monitor Group, BEFORE the forwarded
-        # message itself. Always sent regardless of message type.
-        header_text = (
-            f"{header}\n"
-            f"👤 {sender_link}\n"
-            f"📨 <b>{kind}</b> ↓"
-        )
-        head_res = await bot_api("sendMessage", {
-            "chat_id": monitor_id,
-            "text": header_text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        })
-        if not head_res.get("ok"):
-            # Plain-text fallback so the source group is NEVER lost, even if
-            # HTML parsing fails (special chars in title/name, etc.)
-            print(f"[MONITOR_RELAY] HTML header failed: {head_res.get('description')}")
-            await bot_api("sendMessage", {
+        # The header (group name + ID + sender) is shown at most ONCE per source
+        # group every _HEADER_COOLDOWN seconds (default: 10 minutes). Inside that
+        # window every message is still forwarded normally, but the header is
+        # suppressed so the Monitor Group isn't flooded with identical banners
+        # when one group sends a continuous burst.
+        if _should_send_header(chat_id):
+            header = _format_header(chat_title, chat_id, 1)
+            safe_sender = html.escape(sender_name)
+            sender_link = f'<a href="tg://user?id={sender.id}">{safe_sender}</a>'
+            kind = _kind_of(message)
+            header_text = (
+                f"{header}\n"
+                f"👤 {sender_link}\n"
+                f"📨 <b>{kind}</b> ↓"
+            )
+            head_res = await bot_api("sendMessage", {
                 "chat_id": monitor_id,
-                "text": (
-                    f"📍 GROUP: {chat_title} | 🆔 {chat_id}\n"
-                    f"👤 {sender_name}\n"
-                    f"📨 {kind} ↓"
-                ),
+                "text": header_text,
+                "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             })
+            if not head_res.get("ok"):
+                # Plain-text fallback so the source group is NEVER lost, even if
+                # HTML parsing fails (special chars in title/name, etc.)
+                print(f"[MONITOR_RELAY] HTML header failed: {head_res.get('description')}")
+                await bot_api("sendMessage", {
+                    "chat_id": monitor_id,
+                    "text": (
+                        f"📍 GROUP: {chat_title} | 🆔 {chat_id}\n"
+                        f"👤 {sender_name}\n"
+                        f"📨 {kind} ↓"
+                    ),
+                    "disable_web_page_preview": True,
+                })
 
         # ── STEP 2: forward the ORIGINAL message right after the header ───────
         fwd = await bot_api("forwardMessage", {
