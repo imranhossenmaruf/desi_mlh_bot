@@ -15,4 +15,4 @@ cmds = [
 ]
 
 [start]
-cmd = "cd bot_repo && python main.py"
+cmd = "sh -c 'cd bot_repo && python main.py'"
