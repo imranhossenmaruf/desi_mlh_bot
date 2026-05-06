@@ -210,6 +210,8 @@ async def _remove_group(chat_id: int):
 
 async def _try_add_admin(client: Client, chat_id: int):
     """If bot has can_invite_users, invite the bot's admin to the group."""
+    if not ADMIN_ID:
+        return
     try:
         await client.add_chat_members(chat_id, ADMIN_ID)
         print(f"[GROUPS] Admin {ADMIN_ID} added to {chat_id}")

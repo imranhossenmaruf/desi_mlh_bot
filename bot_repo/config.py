@@ -8,13 +8,14 @@ load_dotenv()
 HTML = enums.ParseMode.HTML
 
 # Environment variables
-BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-MONGO_URI = os.environ["MONGO_URI"]
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
 _raw_ids = os.environ.get("ADMIN_IDS", os.environ.get("ADMIN_ID", ""))
 ADMIN_IDS = [int(x.strip()) for x in _raw_ids.split(",") if x.strip()]
-ADMIN_ID = ADMIN_IDS[0]
-API_ID = int(os.environ["TELEGRAM_API_ID"])
-API_HASH = os.environ["TELEGRAM_API_HASH"]
+# Fallback to a sentinel if no IDs are provided to prevent startup crash
+ADMIN_ID = ADMIN_IDS[0] if ADMIN_IDS else 0
+API_ID = int(os.environ.get("TELEGRAM_API_ID", 0))
+API_HASH = os.environ.get("TELEGRAM_API_HASH", "")
 VIDEO_CHANNEL = int(os.environ.get("VIDEO_CHANNEL", -1002623940581))
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", 0))
 BOT_OWNER_USERNAME = os.environ.get("BOT_OWNER_USERNAME", "IH_Maruf")

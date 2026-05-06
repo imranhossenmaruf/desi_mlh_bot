@@ -65,13 +65,18 @@ async def schedule_loop(client: Client):
                 session = doc.get("session", {})
                 label   = doc.get("label", "?")
                 print(f"[SCHEDULE] Firing scheduled broadcast id={doc_id} label={label}")
-                status_msg = await client.send_message(
-                    ADMIN_ID,
-                    f"📡 <b>Scheduled Broadcast Starting</b>\n"
-                    f"⏰ Scheduled: {label}\n"
-                    f"👥 Sending now...",
-                    parse_mode=HTML,
-                )
+                status_msg = None
+                if ADMIN_ID:
+                    try:
+                        status_msg = await client.send_message(
+                            ADMIN_ID,
+                            f"📡 <b>Scheduled Broadcast Starting</b>\n"
+                            f"⏰ Scheduled: {label}\n"
+                            f"👥 Sending now...",
+                            parse_mode=HTML,
+                        )
+                    except Exception as e:
+                        print(f"[SCHEDULE] Could not send status to ADMIN_ID: {e}")
                 asyncio.create_task(_run_scheduled(client, session, status_msg, doc_id, label))
         except Exception as e:
             print(f"[SCHEDULE] Loop error: {e}")

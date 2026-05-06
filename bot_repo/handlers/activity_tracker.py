@@ -534,7 +534,7 @@ async def groupdm_start(client: Client, message: Message):
                 parse_mode=HTML,
             )
             return
-        _groupdm_sessions[ADMIN_ID] = {
+        _groupdm_sessions[message.from_user.id] = {
             "step":  "content",
             "gid":   gid,
             "title": title,
@@ -562,7 +562,7 @@ async def groupdm_start(client: Client, message: Message):
         buttons.append([InlineKeyboardButton(label, callback_data=f"gdm:{cid}")])
     buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="gdm:cancel")])
 
-    _groupdm_sessions[ADMIN_ID] = {"step": "pick"}
+    _groupdm_sessions[message.from_user.id] = {"step": "pick"}
     await message.reply_text(
         "📤 <b>Group DM</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
         "Select the group to DM all members:",
@@ -579,7 +579,7 @@ async def groupdm_pick_cb(client: Client, cq):
 
     data = cq.data.split(":", 1)[1]
     if data == "cancel":
-        _groupdm_sessions.pop(ADMIN_ID, None)
+        _groupdm_sessions.pop(cq.from_user.id, None)
         await cq.edit_message_text("❌ Cancelled.")
         return
 
@@ -590,7 +590,7 @@ async def groupdm_pick_cb(client: Client, cq):
     except Exception:
         title = str(gid)
 
-    _groupdm_sessions[ADMIN_ID] = {
+    _groupdm_sessions[cq.from_user.id] = {
         "step":  "content",
         "gid":   gid,
         "title": title,
@@ -611,19 +611,19 @@ async def groupdm_content_handler(client: Client, message: Message):
     if not message.from_user or message.from_user.id not in ADMIN_IDS:
         return
 
-    session = _groupdm_sessions.get(ADMIN_ID)
+    session = _groupdm_sessions.get(message.from_user.id)
     if not session or session.get("step") != "content":
         return
 
     text_in = (message.text or "").strip()
     if text_in == "/cancel":
-        _groupdm_sessions.pop(ADMIN_ID, None)
+        _groupdm_sessions.pop(message.from_user.id, None)
         await message.reply_text("❌ Group DM cancelled.", parse_mode=HTML)
         return
 
     gid   = session["gid"]
     title = session["title"]
-    _groupdm_sessions.pop(ADMIN_ID, None)
+    _groupdm_sessions.pop(message.from_user.id, None)
 
     status_msg = await message.reply_text(
         f"⏳ Fetching members of <b>{title}</b>…",
